@@ -289,7 +289,7 @@ static void terminal_cmd_doublepulse(int argc, const char** argv)
 	}
 	timeout_configure_IWDT_slowest();
 
-	utick = (int)(SYSTEM_CORE_CLOCK / 1000000);
+	utick = (int)(SYSTEM_TIMER_CLOCK / 1000000);
 	mcpwm_deinit();
 	mcpwm_foc_deinit();	
 
@@ -298,7 +298,7 @@ static void terminal_cmd_doublepulse(int argc, const char** argv)
 	//TIM4 als Trigger Timer
 	RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
 
-	TIM_TimeBaseStructure.TIM_Period = (SYSTEM_CORE_CLOCK / 20000);
+	TIM_TimeBaseStructure.TIM_Period = (SYSTEM_TIMER_CLOCK / 20000);
 	TIM_TimeBaseStructure.TIM_Prescaler = 0;
 	TIM_TimeBaseStructure.TIM_ClockDivision = 0;
 	TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;

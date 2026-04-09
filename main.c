@@ -250,10 +250,10 @@ uint32_t main_calc_hw_crc(void) {
 
 int main(void) {
 	// Load functions into ITCM RAM
-	extern const unsigned char itcm_text_start;
-	extern const unsigned char itcm_text_end;
-	extern const unsigned char itcm_data;
-	memcpy(&itcm_text_start, &itcm_data, (int) (&itcm_text_end - &itcm_text_start));
+	extern uint8_t itcm_text_start[];
+	extern uint8_t itcm_text_end[];
+	extern uint8_t itcm_data[];
+	memcpy(itcm_text_start, itcm_data, (size_t)(itcm_text_end - itcm_text_start));
 
 	halInit();
 	chSysInit();
@@ -280,7 +280,7 @@ int main(void) {
 	hw_init_gpio();
 	//LED_RED_OFF();
 	//LED_GREEN_OFF();
-	PIN_TEST_ON();
+	//PIN_TEST_ON();
 	conf_general_init();
 //	volatile uint32_t result = flash_helper_verify_flash_memory();
 //	if (result == FAULT_CODE_FLASH_CORRUPTION)	{
@@ -334,7 +334,7 @@ int main(void) {
 	// Threads
 	chThdCreateStatic(led_thread_wa, sizeof(led_thread_wa), NORMALPRIO, led_thread, NULL);
 	chThdCreateStatic(periodic_thread_wa, sizeof(periodic_thread_wa), NORMALPRIO, periodic_thread, NULL);
-	//chThdCreateStatic(flash_integrity_check_thread_wa, sizeof(flash_integrity_check_thread_wa), LOWPRIO, flash_integrity_check_thread, NULL);
+//	chThdCreateStatic(flash_integrity_check_thread_wa, sizeof(flash_integrity_check_thread_wa), LOWPRIO, flash_integrity_check_thread, NULL);
 
 	timeout_init();
 	timeout_configure(appconf->timeout_msec, appconf->timeout_brake_current, appconf->kill_sw_mode);
@@ -343,7 +343,7 @@ int main(void) {
 	bm_init();
 #endif
 
-//	shutdown_init();
+	shutdown_init();
 
 	imu_reset_orientation();
 

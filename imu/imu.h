@@ -22,20 +22,14 @@
 
 #include "ch.h"
 #include "hal.h"
-#include "i2c_bb.h"
 #include "spi_bb.h"
 
 void imu_init(imu_config *set);
 void imu_reset_orientation(void);
-i2c_bb_state *imu_get_i2c(void);
-void imu_init_mpu9x50(stm32_gpio_t *sda_gpio, int sda_pin,
-		stm32_gpio_t *scl_gpio, int scl_pin);
-void imu_init_icm20948(stm32_gpio_t *sda_gpio, int sda_pin,
-		stm32_gpio_t *scl_gpio, int scl_pin, int ad0_val);
-void imu_init_bmi160_i2c(stm32_gpio_t *sda_gpio, int sda_pin,
-		stm32_gpio_t *scl_gpio, int scl_pin);
-void imu_init_lsm6ds3(stm32_gpio_t *sda_gpio, int sda_pin,
-		stm32_gpio_t *scl_gpio, int scl_pin);
+void imu_init_mpu9x50(void);
+void imu_init_icm20948(int ad0_val);
+void imu_init_bmi160_i2c(void);
+void imu_init_lsm6ds3(void);
 void imu_init_bmi160_spi(
         stm32_gpio_t *nss_gpio, int nss_pin,
         stm32_gpio_t *sck_gpio, int sck_pin,

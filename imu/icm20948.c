@@ -18,6 +18,7 @@
     */
 
 #include "icm20948.h"
+#include "hw.h"
 #include "terminal.h"
 #include "commands.h"
 #include "utils_math.h"
@@ -37,12 +38,13 @@ static bool write_single_reg(ICM20948_STATE *s, uint8_t reg, uint8_t value);
 // Private variables
 static ICM20948_STATE *m_terminal_state = 0;
 
-void icm20948_init(ICM20948_STATE *s, i2c_bb_state *i2c_state, int ad0_val,
+void icm20948_init(ICM20948_STATE *s, int ad0_val,
 		stkline_t *work_area, size_t work_area_size) {
 
-	s->i2cs = i2c_state;
 	s->i2c_address = ad0_val ? 0x69 : 0x68;
 	s->read_callback = 0;
+	
+	hw_start_i2c();
 
 	if (reset_init_icm(s)) {
 		s->should_stop = false;
@@ -107,7 +109,7 @@ static bool write_single_reg(ICM20948_STATE *s, uint8_t reg, uint8_t value) {
 	txb[0] = reg;
 	txb[1] = value;
 
-	bool res = i2c_bb_tx_rx(s->i2cs, s->i2c_address, txb, 2, 0, 0);
+	bool res = hw_i2c_tx_rx(s->i2c_address, txb, 2, 0, 0);
 	return res;
 }
 
@@ -116,7 +118,7 @@ static uint8_t read_single_reg(ICM20948_STATE *s, uint8_t reg) {
 	uint8_t txb[1];
 
 	txb[0] = reg;
-	bool res = i2c_bb_tx_rx(s->i2cs, s->i2c_address, txb, 1, rxb, 1);
+	bool res = hw_i2c_tx_rx(s->i2c_address, txb, 1, rxb, 1);
 
 	if (res) {
 		return rxb[0];
@@ -126,7 +128,7 @@ static uint8_t read_single_reg(ICM20948_STATE *s, uint8_t reg) {
 }
 
 static bool reset_init_icm(ICM20948_STATE *s) {
-	i2c_bb_restore_bus(s->i2cs);
+	hw_try_restore_i2c();
 
 	chThdSleep(1);
 
@@ -166,7 +168,7 @@ static THD_FUNCTION(icm_thread, arg) {
 		uint8_t rxb[12];
 		txb[0] = ICM20948_ACCEL_XOUT_H;
 
-		bool res = i2c_bb_tx_rx(s->i2cs, s->i2c_address, txb, 1, rxb, 12);
+		bool res = hw_i2c_tx_rx(s->i2c_address, txb, 1, rxb, 12);
 
 		if (res) {
 			float accel[3], gyro[3], mag[3];

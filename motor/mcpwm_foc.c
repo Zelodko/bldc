@@ -393,6 +393,7 @@ void mcpwm_foc_init(mc_configuration *conf_m1, mc_configuration *conf_m2) {
 	rccResetTIM8();
 	rccResetADC12();
 	rccResetADC3();
+	rccResetDMA1();
 
 	TIM1->CNT = 0;
 	TIM2->CNT = 0;
@@ -410,144 +411,119 @@ void mcpwm_foc_init(mc_configuration *conf_m1, mc_configuration *conf_m2) {
 					  5,
 					  (stm32_dmaisr_t)mcpwm_foc_adc_int_handler,
 					  (void *)0);
-	// DMA Channel 0 (default)
-	// Direction - peripheral to memory (default)
-	// Peripheral Increment (default)
-	// Memory Increment
-	DMA1_Stream1->CR |= DMA_SxCR_MINC;
-	//DMA1_Stream2->CR |= DMA_SxCR_MINC;
-	//DMA1_Stream3->CR |= DMA_SxCR_MINC;
-	// Peripheral Data size - half word
-	DMA1_Stream1->CR |= DMA_SxCR_PSIZE_0;
-	//DMA1_Stream2->CR |= DMA_SxCR_PSIZE_0;
-	//DMA1_Stream3->CR |= DMA_SxCR_PSIZE_0;
-	// Memory data size - half word
-	DMA1_Stream1->CR |= DMA_SxCR_MSIZE_0;
-	//DMA1_Stream2->CR |= DMA_SxCR_MSIZE_0;
-	//DMA1_Stream3->CR |= DMA_SxCR_MSIZE_0;
-	// Mode - circular
-	DMA1_Stream1->CR |= DMA_SxCR_CIRC;
-	//DMA1_Stream2->CR |= DMA_SxCR_CIRC;
-	//DMA1_Stream3->CR |= DMA_SxCR_CIRC;
-	// Priority - high
-	DMA1_Stream1->CR |= DMA_SxCR_PL_1;
-	//DMA1_Stream2->CR |= DMA_SxCR_PL_1;
-	//DMA1_Stream3->CR |= DMA_SxCR_PL_1;
-	// Memory Burst - single (default)
-	// Peripheral Burst - single (default)
-	// Memory base address
-	DMA1_Stream1->M0AR = (uint32_t)&ADC_Value;
-	//DMA1_Stream2->M0AR = (uint32_t)&ADC_Value[HW_ADC_IND_DMA_2];
-	//DMA1_Stream3->M0AR = (uint32_t)&ADC_Value[HW_ADC_IND_DMA_3];
-	// Peripheral base address
-	DMA1_Stream1->PAR = (uint32_t)&ADC1->DR;
-	//DMA1_Stream2->PAR = (uint32_t)&ADC2->DR;
-	//DMA1_Stream3->PAR = (uint32_t)&ADC3->DR;
-	// Buffer Size
-	DMA1_Stream1->NDTR = HW_ADC_NBR_CONV;
-	//DMA1_Stream2->NDTR = HW_ADC_NBR_CONV;
-	//DMA1_Stream3->NDTR = HW_ADC_NBR_CONV;
-	// Note: The half transfer interrupt is used as we already have all current and voltage
-	// samples by then and we can start processing them. Entering the interrupt earlier gives
-	// more cycles to finish it and update the timer before the next zero vector. This helps
-	// at higher f_zv. Only use this if the three first samples are current samples.
-//#if ADC_IND_CURR1 < 3 && ADC_IND_CURR2 < 3 && ADC_IND_CURR3 < 3
-//	DMA1_Stream1->CR |= DMA_SxCR_HTIE;
-//	DMA1_Stream2->CR |= DMA_SxCR_HTIE;
-//	DMA1_Stream3->CR |= DMA_SxCR_HTIE;
-//#else
-	DMA1_Stream1->CR |= DMA_SxCR_TCIE;
-	//DMA1_Stream2->CR |= DMA_SxCR_TCIE;
-	//DMA1_Stream3->CR |= DMA_SxCR_TCIE;
-//#endif
 
-	// Connect ADCs to the DMAs using the DMAMUX
-	// Inputs
-	// 9 = adc1_dma
-	// 10 = adc2_dma
-	// 115 =  adc3_dma
-	DMAMUX1_Channel1->CCR = 9;
-	//DMAMUX1_Channel2->CCR = 10;
-	//DMAMUX1_Channel3->CCR = 115;
+    DMA1_Stream1->CR = 0;
+    DMA1_Stream2->CR = 0;
+    DMA1_Stream3->CR = 0;
+
+    /* Peripheral → memory */
+    DMA1_Stream1->CR |= DMA_SxCR_MINC | DMA_SxCR_CIRC | DMA_SxCR_PL_1;
+    DMA1_Stream2->CR |= DMA_SxCR_MINC | DMA_SxCR_CIRC | DMA_SxCR_PL_1;
+    DMA1_Stream3->CR |= DMA_SxCR_MINC | DMA_SxCR_CIRC | DMA_SxCR_PL_1;
+
+    /* 16-bit */
+    DMA1_Stream1->CR |= DMA_SxCR_PSIZE_0 | DMA_SxCR_MSIZE_0;
+    DMA1_Stream2->CR |= DMA_SxCR_PSIZE_0 | DMA_SxCR_MSIZE_0;
+    DMA1_Stream3->CR |= DMA_SxCR_PSIZE_0 | DMA_SxCR_MSIZE_0;
+
+#if ADC_IND_CURR1 < 3 && ADC_IND_CURR2 < 3 && ADC_IND_CURR3 < 3
+    DMA1_Stream1->CR |= DMA_SxCR_HTIE;
+    DMA1_Stream2->CR |= DMA_SxCR_HTIE;
+    DMA1_Stream3->CR |= DMA_SxCR_HTIE;
+#else
+    DMA1_Stream1->CR |= DMA_SxCR_TCIE;
+    DMA1_Stream2->CR |= DMA_SxCR_TCIE;
+    DMA1_Stream3->CR |= DMA_SxCR_TCIE;
+#endif
+
+    DMA1_Stream1->PAR  = (uint32_t)&ADC1->DR;
+    DMA1_Stream2->PAR  = (uint32_t)&ADC2->DR;
+    DMA1_Stream3->PAR  = (uint32_t)&ADC3->DR;
+
+    DMA1_Stream1->M0AR = (uint32_t)&ADC_Value[HW_ADC_IND_DMA_1];
+    DMA1_Stream2->M0AR = (uint32_t)&ADC_Value[HW_ADC_IND_DMA_2];
+    DMA1_Stream3->M0AR = (uint32_t)&ADC_Value[HW_ADC_IND_DMA_3];
+
+    DMA1_Stream1->NDTR = HW_ADC_NBR_CONV;
+    DMA1_Stream2->NDTR = HW_ADC_NBR_CONV;
+    DMA1_Stream3->NDTR = HW_ADC_NBR_CONV;
+
+    /* DMAMUX */
+    DMAMUX1_Channel1->CCR = 9;    // ADC1
+    DMAMUX1_Channel2->CCR = 10;   // ADC2
+    DMAMUX1_Channel3->CCR = 115;  // ADC3
 
 	// Enable stream
 	DMA1_Stream1->CR |= DMA_SxCR_EN;
-	//DMA1_Stream2->CR |= DMA_SxCR_EN;
-	//DMA1_Stream3->CR |= DMA_SxCR_EN;
+	DMA1_Stream2->CR |= DMA_SxCR_EN;
+	DMA1_Stream3->CR |= DMA_SxCR_EN;
 
-	// ADC Common Init
-	// Enable ADC Voltage regulator?
-	ADC1->CR = ADC_CR_ADVREGEN;
-	ADC2->CR = ADC_CR_ADVREGEN;
-	ADC3->CR = ADC_CR_ADVREGEN;
+    ADC1->CR = ADC_CR_ADVREGEN;
+    ADC2->CR = ADC_CR_ADVREGEN;
+    ADC3->CR = ADC_CR_ADVREGEN;
 
-	// Wait for LDO to sabilise
-	while((ADC1->ISR & ADC_ISR_LDORDY) == 0);
-	while((ADC2->ISR & ADC_ISR_LDORDY) == 0);
-	while((ADC3->ISR & ADC_ISR_LDORDY) == 0);
+    chThdSleepMicroseconds(20);   // REQUIRED on cold boot
 
-	// Enable boost (>20MHZ)
-	ADC1->CR |= ADC_CR_BOOST;
-	ADC2->CR |= ADC_CR_BOOST;
-	ADC3->CR |= ADC_CR_BOOST;
+    while (!(ADC1->ISR & ADC_ISR_LDORDY));
+    while (!(ADC2->ISR & ADC_ISR_LDORDY));
+    while (!(ADC3->ISR & ADC_ISR_LDORDY));
 
-//	// First calibrate
-//	ADC1->CR &= ~ADC_CR_ADEN;                           // ensure that the ADC is off
-//	ADC1->CR |= ADC_CR_ADCAL;                           // start calibration
-//	while(ADC1->CR & ADC_CR_ADCAL);                    // wait until ADCAL is 0 and cal is complete
-//	ADC2->CR &= ~ADC_CR_ADEN;                           // ensure that the ADC is off
-//	ADC2->CR |= ADC_CR_ADCAL;                           // start calibration
-//	while(ADC2->CR & ADC_CR_ADCAL);                    // wait until ADCAL is 0 and cal is complete
-//	ADC3->CR &= ~ADC_CR_ADEN;                           // ensure that the ADC is off
-//	ADC3->CR |= ADC_CR_ADCAL;                           // start calibration
-//	while(ADC3->CR & ADC_CR_ADCAL);                    // wait until ADCAL is 0 and cal is complete
+    ADC1->CR |= ADC_CR_BOOST;
+    ADC2->CR |= ADC_CR_BOOST;
+    ADC3->CR |= ADC_CR_BOOST;
 
-	// Enable DMA access 11: DMA Circular Mode selected
-	ADC1->CFGR = ADC_CFGR_DMNGT_1 | ADC_CFGR_DMNGT_0;
-	ADC2->CFGR = ADC_CFGR_DMNGT_1 | ADC_CFGR_DMNGT_0;
-	ADC3->CFGR = ADC_CFGR_DMNGT_1 | ADC_CFGR_DMNGT_0;
+    /* Calibration */
+    ADC1->CR |= ADC_CR_ADCAL;
+    ADC2->CR |= ADC_CR_ADCAL;
+    ADC3->CR |= ADC_CR_ADCAL;
 
-	// Resolution 12 bit
-	// 000: 16 bits
-	// 001: 14 bits (for devices revision Y), 14 bits in legacy mode (for devices revision V, not optimized power consumption)
-	// 101: 14 bits (for devices revision V)
-	// 010: 12 bits (for devices revision Y), 12 bits in legacy mode (for devices revision V, not optimized power consumption)
-	// 110: 12 bits (for devices revision V)
-	// 011: 10 bits
-	// 100: 8 bits (for devices revision Y)
-	// 111: 8 bits (for devices revision V
-	ADC1->CFGR |= ADC_CFGR_RES_2 | ADC_CFGR_RES_1;
-	ADC2->CFGR |= ADC_CFGR_RES_2 | ADC_CFGR_RES_1;
-	ADC3->CFGR |= ADC_CFGR_RES_2 | ADC_CFGR_RES_1;
+    while (ADC1->CR & ADC_CR_ADCAL);
+    while (ADC2->CR & ADC_CR_ADCAL);
+    while (ADC3->CR & ADC_CR_ADCAL);
 
-	// External trigger - T2 CC2 (0011)
-	// External trigger Edge - Falling	(10)
-	ADC1->CFGR |= ADC_CFGR_EXTSEL_1 | ADC_CFGR_EXTSEL_0 | ADC_CFGR_EXTEN_1;
-	ADC2->CFGR |= ADC_CFGR_EXTSEL_1 | ADC_CFGR_EXTSEL_0 | ADC_CFGR_EXTEN_1;
-	ADC3->CFGR |= ADC_CFGR_EXTSEL_1 | ADC_CFGR_EXTSEL_0 | ADC_CFGR_EXTEN_1;
+    //ADC12_COMMON->CCR |= ADC_CCR_VREFEN;
+    //ADC3_COMMON->CCR  |= ADC_CCR_VREFEN;
 
-	// Number of conversions (0 = 1 conversion)
-	ADC1->SQR1 |= (HW_ADC_NBR_CONV - 1) << ADC_SQR1_L_Pos;
-	ADC2->SQR1 |= (HW_ADC_NBR_CONV - 1) << ADC_SQR1_L_Pos;
-	ADC3->SQR1 |= (HW_ADC_NBR_CONV - 1) << ADC_SQR1_L_Pos;
 
-	// VREFINT Enable
-	ADC12_COMMON->CCR |= ADC_CCR_VREFEN;
-	ADC3_COMMON->CCR |= ADC_CCR_VREFEN;
+    /* DMA circular */
+    ADC1->CFGR = ADC_CFGR_DMNGT_1 | ADC_CFGR_DMNGT_0;
+    ADC2->CFGR = ADC_CFGR_DMNGT_1 | ADC_CFGR_DMNGT_0;
+    ADC3->CFGR = ADC_CFGR_DMNGT_1 | ADC_CFGR_DMNGT_0;
+
+    /* 16-bit */
+	ADC1->CFGR &= ~ADC_CFGR_RES;
+	ADC2->CFGR &= ~ADC_CFGR_RES;
+	ADC3->CFGR &= ~ADC_CFGR_RES;
+
+    /* External trigger TIM2_CC2 falling */
+    ADC1->CFGR |= ADC_CFGR_EXTSEL_1 | ADC_CFGR_EXTSEL_0 | ADC_CFGR_EXTEN_1;
+    ADC2->CFGR |= ADC_CFGR_EXTSEL_1 | ADC_CFGR_EXTSEL_0 | ADC_CFGR_EXTEN_1;
+    ADC3->CFGR |= ADC_CFGR_EXTSEL_1 | ADC_CFGR_EXTSEL_0 | ADC_CFGR_EXTEN_1;
+
+    ADC1->SQR1 = (HW_ADC_NBR_CONV - 1) << ADC_SQR1_L_Pos;
+    ADC2->SQR1 = (HW_ADC_NBR_CONV - 1) << ADC_SQR1_L_Pos;
+    ADC3->SQR1 = (HW_ADC_NBR_CONV - 1) << ADC_SQR1_L_Pos;
+
 
 	hw_setup_adc_channels();
 
-	// Enable ADCs
-	ADC1->CR |= ADC_CR_ADEN;
-	ADC2->CR |= ADC_CR_ADEN;
-	ADC3->CR |= ADC_CR_ADEN;
+	// Enable and start
+    ADC1->CR |= ADC_CR_ADEN;
+    ADC2->CR |= ADC_CR_ADEN;
+    ADC3->CR |= ADC_CR_ADEN;
 
-	// Start conversion
-	ADC1->CR |= ADC_CR_ADSTART;
-	ADC2->CR |= ADC_CR_ADSTART;
-	ADC3->CR |= ADC_CR_ADSTART;
+    while (!(ADC1->ISR & ADC_ISR_ADRDY));
+    while (!(ADC2->ISR & ADC_ISR_ADRDY));
+    while (!(ADC3->ISR & ADC_ISR_ADRDY));
 
+    /* Enable DMA AFTER ADC ready */
+    DMA1_Stream1->CR |= DMA_SxCR_EN;
+    DMA1_Stream2->CR |= DMA_SxCR_EN;
+    DMA1_Stream3->CR |= DMA_SxCR_EN;
 
+    ADC1->CR |= ADC_CR_ADSTART;
+    ADC2->CR |= ADC_CR_ADSTART;
+    ADC3->CR |= ADC_CR_ADSTART;
 
 	timer_reinit((int)m_motor_1.m_conf->foc_f_zv);
 
@@ -567,7 +543,7 @@ void mcpwm_foc_init(mc_configuration *conf_m1, mc_configuration *conf_m2) {
 #else
 	if (m_motor_1.m_conf->foc_offsets_cal_mode & (1 << 0)) {
 		systime_t cal_start_time = chVTGetSystemTimeX();
-		float cal_start_timeout = 0.0; // TODO EM: Put back to 10
+		float cal_start_timeout = 10.0; // TODO EM: Put back to 10
 
 		// Wait for input voltage to rise above minimum voltage
 		while (mc_interface_get_input_voltage_filtered() < m_motor_1.m_conf->l_min_vin) {
@@ -2907,7 +2883,7 @@ __attribute__((section(".itcm_text")))
 void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 	(void)p;
 	(void)flags;
-	PIN_TEST_ON();
+	//PIN_TEST_ON();
 	PIN_ADCTEST_ON();
 
 
@@ -3029,7 +3005,7 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 	}
 
 	if (do_return) {
-		PIN_TEST_OFF();
+		//PIN_TEST_OFF();
 		PIN_ADCTEST_OFF();
 		return;
 
@@ -3064,7 +3040,7 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 	float curr1 = 0;
 	float curr2 = 0;
 
-	// Get ADC readings 0-4095
+	// Get ADC readings 0-65535
 	if (is_second_motor) {
 		curr0 = GET_CURRENT1_M2();
 		curr1 = GET_CURRENT2_M2();
@@ -3779,7 +3755,7 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 #endif
 
 	m_isr_motor = 0;
-	PIN_TEST_OFF();
+	//PIN_TEST_OFF();
 	PIN_ADCTEST_OFF();
 	m_last_adc_isr_duration = timer_seconds_elapsed_since(t_start);
 }

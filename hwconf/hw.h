@@ -334,7 +334,7 @@
 // Current ADC macros. Override them for custom current measurement functions.
 #ifndef GET_CURRENT1
 #ifdef INVERTED_SHUNT_POLARITY
-#define GET_CURRENT1()		(4095.0 - (float)ADC_Value[ADC_IND_CURR1])
+#define GET_CURRENT1()		(65535.0 - (float)ADC_Value[ADC_IND_CURR1])
 #else
 #define GET_CURRENT1()		((float)ADC_Value[ADC_IND_CURR1])
 #endif
@@ -342,7 +342,7 @@
 
 #ifndef GET_CURRENT2
 #ifdef INVERTED_SHUNT_POLARITY
-#define GET_CURRENT2()		(4095.0 - (float)ADC_Value[ADC_IND_CURR2])
+#define GET_CURRENT2()		(65535.0 - (float)ADC_Value[ADC_IND_CURR2])
 #else
 #define GET_CURRENT2()		((float)ADC_Value[ADC_IND_CURR2])
 #endif
@@ -352,7 +352,7 @@
 #ifndef GET_CURRENT3
 #ifdef ADC_IND_CURR3
 #ifdef INVERTED_SHUNT_POLARITY
-#define GET_CURRENT3()		(4095.0 - (float)ADC_Value[ADC_IND_CURR3])
+#define GET_CURRENT3()		(65535.0 - (float)ADC_Value[ADC_IND_CURR3])
 #else
 #define GET_CURRENT3()		((float)ADC_Value[ADC_IND_CURR3])
 #endif
@@ -371,7 +371,7 @@
 #ifndef GET_CURRENT1_M2
 #ifdef ADC_IND_CURR4
 #ifdef INVERTED_SHUNT_POLARITY
-#define GET_CURRENT1_M2()	(4095.0 - (float)ADC_Value[ADC_IND_CURR4])
+#define GET_CURRENT1_M2()	(65535.0 - (float)ADC_Value[ADC_IND_CURR4])
 #else
 #define GET_CURRENT1_M2()	((float)ADC_Value[ADC_IND_CURR4])
 #endif
@@ -384,7 +384,7 @@
 #ifndef GET_CURRENT2_M2
 #ifdef ADC_IND_CURR5
 #ifdef INVERTED_SHUNT_POLARITY
-#define GET_CURRENT2_M2()	(4095.0 - (float)ADC_Value[ADC_IND_CURR5])
+#define GET_CURRENT2_M2()	(65535.0 - (float)ADC_Value[ADC_IND_CURR5])
 #else
 #define GET_CURRENT2_M2()	((float)ADC_Value[ADC_IND_CURR5])
 #endif
@@ -398,7 +398,7 @@
 #ifndef GET_CURRENT3_M2
 #ifdef ADC_IND_CURR6
 #ifdef INVERTED_SHUNT_POLARITY
-#define GET_CURRENT3_M2()	(4095.0 - (float)ADC_Value[ADC_IND_CURR6])
+#define GET_CURRENT3_M2()	(65535.0 - (float)ADC_Value[ADC_IND_CURR6])
 #else
 #define GET_CURRENT3_M2()	((float)ADC_Value[ADC_IND_CURR6])
 #endif
@@ -434,7 +434,7 @@
 #endif
 
 #ifndef HW_MAX_CURRENT_OFFSET
-#define HW_MAX_CURRENT_OFFSET 				620
+#define HW_MAX_CURRENT_OFFSET 				9920
 #endif
 #ifndef MCCONF_MAX_CURRENT_UNBALANCE
 #define MCCONF_MAX_CURRENT_UNBALANCE		(FAC_CURRENT * 512)
@@ -468,22 +468,22 @@
 
 // Voltage on phase input used for FOC 
 #ifndef ADC_V_L1_VOLTS
-#define ADC_V_L1_VOLTS				((float)ADC_V_L1 / 4096.0 * V_REG)
+#define ADC_V_L1_VOLTS				((float)ADC_V_L1 / 65536.0 * V_REG)
 #endif
 #ifndef ADC_V_L2_VOLTS
-#define ADC_V_L2_VOLTS				((float)ADC_V_L2 / 4096.0 * V_REG)
+#define ADC_V_L2_VOLTS				((float)ADC_V_L2 / 65536.0 * V_REG)
 #endif
 #ifndef ADC_V_L3_VOLTS
-#define ADC_V_L3_VOLTS				((float)ADC_V_L3 / 4096.0 * V_REG)
+#define ADC_V_L3_VOLTS				((float)ADC_V_L3 / 65536.0 * V_REG)
 #endif
 #ifndef ADC_V_L4_VOLTS
-#define ADC_V_L4_VOLTS				((float)ADC_V_L4 / 4096.0 * V_REG)
+#define ADC_V_L4_VOLTS				((float)ADC_V_L4 / 65536.0 * V_REG)
 #endif
 #ifndef ADC_V_L5_VOLTS
-#define ADC_V_L5_VOLTS				((float)ADC_V_L5 / 4096.0 * V_REG)
+#define ADC_V_L5_VOLTS				((float)ADC_V_L5 / 65536.0 * V_REG)
 #endif
 #ifndef ADC_V_L6_VOLTS
-#define ADC_V_L6_VOLTS				((float)ADC_V_L6 / 4096.0 * V_REG)
+#define ADC_V_L6_VOLTS				((float)ADC_V_L6 / 65536.0 * V_REG)
 #endif
 
 // Adc voltage scaling on phases and input
@@ -522,10 +522,10 @@
 
 // CAN device and port (default CAN1)
 #ifndef HW_CANRX_PORT
-#define HW_CANRX_PORT			GPIOB
+#define HW_CANRX_PORT			GPIOD
 #endif
 #ifndef HW_CANRX_PIN
-#define HW_CANRX_PIN			8
+#define HW_CANRX_PIN			0
 #endif
 #ifndef HW_CANTX_PORT
 #define HW_CANTX_PORT			GPIOB
@@ -724,6 +724,7 @@ void hw_setup_adc_channels(void);
 void hw_start_i2c(void);
 void hw_stop_i2c(void);
 void hw_try_restore_i2c(void);
+bool hw_i2c_tx_rx(uint8_t dev_addr, const uint8_t *tx_buf, size_t tx_len, uint8_t *rx_buf, size_t rx_len);
 uint8_t hw_id_from_uuid(void);
 uint8_t hw_id_from_pins(void);
 void hw_setup_adc_channel_helper(ADC_TypeDef* ADCx, uint8_t ADC_Channel, uint8_t Rank, uint8_t ADC_SampleTime);

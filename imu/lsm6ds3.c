@@ -18,8 +18,8 @@
 	*/
 
 #include "lsm6ds3.h"
+#include "hw.h"
 #include "terminal.h"
-#include "i2c_bb.h"
 #include "commands.h"
 #include "utils_math.h"
 
@@ -27,7 +27,6 @@
 
 
 static thread_t *lsm6ds3_thread_ref = NULL;
-static i2c_bb_state *m_i2c_bb;
 static volatile uint16_t lsm6ds3_addr;
 static int rate_hz = 1000;
 static IMU_FILTER filter;
@@ -48,23 +47,21 @@ void lsm6ds3_set_filter(IMU_FILTER f) {
 	filter = f;
 }
 
-void lsm6ds3_init(i2c_bb_state *i2c_state,
-		stkline_t *work_area, size_t work_area_size) {
+void lsm6ds3_init(stkline_t *work_area, size_t work_area_size) {
 
 	read_callback = 0;
-
-	m_i2c_bb = i2c_state;
+	hw_start_i2c();
 
 	uint8_t txb[2];
 	uint8_t rxb[2];
 
 	txb[0] = LSM6DS3_ACC_GYRO_WHO_AM_I_REG;
 	lsm6ds3_addr = LSM6DS3_ACC_GYRO_ADDR_A;
-	bool res = i2c_bb_tx_rx(m_i2c_bb, lsm6ds3_addr, txb, 1, rxb, 1);
+	bool res = hw_i2c_tx_rx(lsm6ds3_addr, txb, 1, rxb, 1);
 	if (!res || (rxb[0] != 0x69 && rxb[0] != 0x6A && rxb[0] != 0x6C)) {
 		commands_printf("LSM6DS3 Address A failed, trying B (rx: %d)", rxb[0]);
 		lsm6ds3_addr = LSM6DS3_ACC_GYRO_ADDR_B;
-		res = i2c_bb_tx_rx(m_i2c_bb, lsm6ds3_addr, txb, 1, rxb, 1);
+		res = hw_i2c_tx_rx(lsm6ds3_addr, txb, 1, rxb, 1);
 		if (!res || (rxb[0] != 0x69 && rxb[0] != 0x6A && rxb[0] != 0x6C)) {
 			commands_printf("LSM6DS3 Address B failed (rx: %d)", rxb[0]);
 			return;
@@ -127,7 +124,7 @@ void lsm6ds3_init(i2c_bb_state *i2c_state,
 	} else {
 		txb[1] |= LSM6DS3_ACC_GYRO_ODR_XL_6660Hz;
 	}
-	res = i2c_bb_tx_rx(m_i2c_bb, lsm6ds3_addr, txb, 2, rxb, 1);
+	res = hw_i2c_tx_rx(lsm6ds3_addr, txb, 2, rxb, 1);
 	if (!res){
 		commands_printf("LSM6DS3 Accel Config FAILED");
 		return;
@@ -157,7 +154,7 @@ void lsm6ds3_init(i2c_bb_state *i2c_state,
 	} else {
 		txb[1] |= LSM6DS3TRC_ACC_GYRO_ODR_G_6660Hz;
 	}
-	res = i2c_bb_tx_rx(m_i2c_bb, lsm6ds3_addr, txb, 2, rxb, 1);
+	res = hw_i2c_tx_rx(lsm6ds3_addr, txb, 2, rxb, 1);
 	if (!res){
 		commands_printf("LSM6DS3 Gyro Config FAILED");
 		return;
@@ -177,7 +174,7 @@ void lsm6ds3_init(i2c_bb_state *i2c_state,
 		// Standard LSM6DS3 only: Set XL anti-aliasing filter to be manually configured
 		txb[1] = LSM6DS3_ACC_GYRO_BW_SCAL_ODR_ENABLED;
 	}
-	res = i2c_bb_tx_rx(m_i2c_bb, lsm6ds3_addr, txb, 2, rxb, 1);
+	res = hw_i2c_tx_rx(lsm6ds3_addr, txb, 2, rxb, 1);
 	if (!res){
 		commands_printf("LSM6DS3 ODR Config FAILED");
 		return;
@@ -189,7 +186,7 @@ void lsm6ds3_init(i2c_bb_state *i2c_state,
 		#define LSM6DS3TRC_HPCF_XL_ODR9 0x40
 		txb[0] = LSM6DS3_ACC_GYRO_CTRL8_XL;
 		txb[1] = LSM6DS3TRC_LPF2_XL_EN | LSM6DS3TRC_HPCF_XL_ODR9;
-		res = i2c_bb_tx_rx(m_i2c_bb, lsm6ds3_addr, txb, 2, rxb, 1);
+		res = hw_i2c_tx_rx(lsm6ds3_addr, txb, 2, rxb, 1);
 		if (!res) {
 			commands_printf("LSM6DS3 Accel Low Pass Config FAILED");
 			return;
@@ -199,7 +196,7 @@ void lsm6ds3_init(i2c_bb_state *i2c_state,
 	// Disable IMU writing to output registers
 	txb[0] = LSM6DS3_ACC_GYRO_CTRL3_C;
 	txb[1] = LSM6DS3_ACC_GYRO_BDU_BLOCK_UPDATE | LSM6DS3_ACC_GYRO_IF_INC_ENABLED;
-	i2c_bb_tx_rx(m_i2c_bb, lsm6ds3_addr, txb, 2, rxb, 1);
+	hw_i2c_tx_rx(lsm6ds3_addr, txb, 2, rxb, 1);
 
 	terminal_register_command_callback(
 			"lsm_read_reg",
@@ -212,9 +209,8 @@ void lsm6ds3_init(i2c_bb_state *i2c_state,
 
 void lsm6ds3_stop(void) {
 	if (lsm6ds3_thread_ref != NULL){
-		// TODO EM: FIX
 		chThdTerminate(lsm6ds3_thread_ref);
-		//chThdWait(lsm6ds3_thread_ref);
+		chThdWait(lsm6ds3_thread_ref);
 	}
 	lsm6ds3_thread_ref = NULL;
 	terminal_unregister_callback(terminal_read_reg);
@@ -229,7 +225,7 @@ static uint8_t read_single_reg(uint8_t reg) {
 	uint8_t rxb[2];
 
 	txb[0] = reg;
-	bool res = i2c_bb_tx_rx(m_i2c_bb, lsm6ds3_addr, txb, 1, rxb, 2);
+	bool res = hw_i2c_tx_rx(lsm6ds3_addr, txb, 1, rxb, 2);
 
 	if (res) {
 		return rxb[0];
@@ -265,13 +261,15 @@ static THD_FUNCTION(lsm6ds3_thread, arg) {
 	systime_t iteration_timer = chVTGetSystemTimeX();
 	const systime_t desired_interval = OSAL_US2I(1000000 / rate_hz);
 
+	hw_try_restore_i2c();
+
 	while (!chThdShouldTerminateX()) {
 		uint8_t txb[2];
 		uint8_t rxb[12];
 
 		// Read IMU output registers
 		txb[0] = LSM6DS3_ACC_GYRO_OUTX_L_G;
-		bool res = i2c_bb_tx_rx(m_i2c_bb, lsm6ds3_addr, txb, 1, rxb, 12);
+		bool res = hw_i2c_tx_rx(lsm6ds3_addr, txb, 1, rxb, 12);
 
 		// Parse 6 axis values
 		float gx = (float)((int16_t)((uint16_t)rxb[1] << 8) + rxb[0]) * 4.375 * (2000 / 125) / 1000;
@@ -300,4 +298,3 @@ static THD_FUNCTION(lsm6ds3_thread, arg) {
 		}
 	}
 }
-

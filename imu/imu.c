@@ -39,7 +39,6 @@ static ATTITUDE_INFO m_att;
 static FusionAhrs m_fusionAhrs;
 static float m_accel[3], m_gyro[3], m_mag[3];
 static stkline_t m_thd_work_area[THD_WORKING_AREA_SIZE(1024) / sizeof(stkline_t)];
-static i2c_bb_state m_i2c_bb;
 static spi_bb_state m_spi_bb;
 static ICM20948_STATE m_icm20948_state;
 static BMI_STATE m_bmi_state;
@@ -108,26 +107,22 @@ void imu_init(imu_config *set) {
 
 	if (set->type == IMU_TYPE_INTERNAL) {
 #ifdef MPU9X50_SDA_GPIO
-		imu_init_mpu9x50(MPU9X50_SDA_GPIO, MPU9X50_SDA_PIN,
-				MPU9X50_SCL_GPIO, MPU9X50_SCL_PIN);
+		imu_init_mpu9x50();
 		m_imu_type_internal = "MPU9X50";
 #endif
 
 #ifdef ICM20948_SDA_GPIO
-		imu_init_icm20948(ICM20948_SDA_GPIO, ICM20948_SDA_PIN,
-				ICM20948_SCL_GPIO, ICM20948_SCL_PIN, ICM20948_AD0_VAL);
+		imu_init_icm20948(ICM20948_AD0_VAL);
 		m_imu_type_internal = "ICM20948";
 #endif
 
 #ifdef BMI160_SDA_GPIO
-		imu_init_bmi160_i2c(BMI160_SDA_GPIO, BMI160_SDA_PIN,
-				BMI160_SCL_GPIO, BMI160_SCL_PIN);
+		imu_init_bmi160_i2c();
 		m_imu_type_internal = "BMI160";
 #endif
 
 #ifdef LSM6DS3_SDA_GPIO
-		imu_init_lsm6ds3(LSM6DS3_SDA_GPIO, LSM6DS3_SDA_PIN,
-				LSM6DS3_SCL_GPIO, LSM6DS3_SCL_PIN);
+		imu_init_lsm6ds3();
 		m_imu_type_internal = "LSM6DS3";
 #endif
 
@@ -151,20 +146,13 @@ void imu_init(imu_config *set) {
 		m_imu_type_internal = "BMI160_SPI";
 #endif
 	} else if (set->type == IMU_TYPE_EXTERNAL_MPU9X50) {
-		imu_init_mpu9x50(HW_I2C_SDA_PORT, HW_I2C_SDA_PIN,
-				HW_I2C_SCL_PORT, HW_I2C_SCL_PIN);
+		imu_init_mpu9x50();
 	} else if (set->type == IMU_TYPE_EXTERNAL_ICM20948) {
-		imu_init_icm20948(HW_I2C_SDA_PORT, HW_I2C_SDA_PIN,
-				HW_I2C_SCL_PORT, HW_I2C_SCL_PIN, 0);
+		imu_init_icm20948(0);
 	} else if (set->type == IMU_TYPE_EXTERNAL_BMI160) {
-		imu_init_bmi160_i2c(HW_I2C_SDA_PORT, HW_I2C_SDA_PIN,
-				HW_I2C_SCL_PORT, HW_I2C_SCL_PIN);
+		imu_init_bmi160_i2c();
 	} else if(set->type == IMU_TYPE_EXTERNAL_LSM6DS3) {
-		imu_init_lsm6ds3(HW_I2C_SDA_PORT, HW_I2C_SDA_PIN,
-				HW_I2C_SCL_PORT, HW_I2C_SCL_PIN);
-	} else if (set->type == IMU_TYPE_EXTERNAL_BMI160) {
-		imu_init_bmi160_i2c(HW_I2C_SDA_PORT, HW_I2C_SDA_PIN,
-				HW_I2C_SCL_PORT, HW_I2C_SCL_PIN);
+		imu_init_lsm6ds3();
 	}
 
 	terminal_register_command_callback(
@@ -182,47 +170,22 @@ void imu_reset_orientation(void) {
 	ahrs_update_all_parameters(&m_att, 1.0, 10.0, 0.0, 2.0);
 }
 
-i2c_bb_state *imu_get_i2c(void) {
-	return &m_i2c_bb;
-}
-
-void imu_init_mpu9x50(stm32_gpio_t *sda_gpio, int sda_pin,
-		stm32_gpio_t *scl_gpio, int scl_pin) {
+void imu_init_mpu9x50() {
 	imu_stop();
 
-	mpu9150_init(sda_gpio, sda_pin,
-			scl_gpio, scl_pin,
-			m_thd_work_area, sizeof(m_thd_work_area));
+	mpu9150_init(m_thd_work_area, sizeof(m_thd_work_area));
 	mpu9150_set_read_callback(imu_read_callback);
 }
 
-void imu_init_icm20948(stm32_gpio_t *sda_gpio, int sda_pin,
-		stm32_gpio_t *scl_gpio, int scl_pin, int ad0_val) {
+void imu_init_icm20948(int ad0_val) {
 	imu_stop();
 
-	m_i2c_bb.sda_gpio = sda_gpio;
-	m_i2c_bb.sda_pin = sda_pin;
-	m_i2c_bb.scl_gpio = scl_gpio;
-	m_i2c_bb.scl_pin = scl_pin;
-	m_i2c_bb.rate = I2C_BB_RATE_400K;
-	i2c_bb_init(&m_i2c_bb);
-
-	icm20948_init(&m_icm20948_state,
-			&m_i2c_bb, ad0_val,
-			m_thd_work_area, sizeof(m_thd_work_area));
+	icm20948_init(&m_icm20948_state, ad0_val, m_thd_work_area, sizeof(m_thd_work_area));
 	icm20948_set_read_callback(&m_icm20948_state, imu_read_callback);
 }
 
-void imu_init_bmi160_i2c(stm32_gpio_t *sda_gpio, int sda_pin,
-		stm32_gpio_t *scl_gpio, int scl_pin) {
+void imu_init_bmi160_i2c() {
 	imu_stop();
-
-	m_i2c_bb.sda_gpio = sda_gpio;
-	m_i2c_bb.sda_pin = sda_pin;
-	m_i2c_bb.scl_gpio = scl_gpio;
-	m_i2c_bb.scl_pin = scl_pin;
-	m_i2c_bb.rate = I2C_BB_RATE_400K;
-	i2c_bb_init(&m_i2c_bb);
 
 	m_bmi_state.sensor.id = BMI160_I2C_ADDR;
 	m_bmi_state.sensor.interface = BMI160_I2C_INTF;
@@ -259,19 +222,11 @@ void imu_init_bmi160_spi(stm32_gpio_t *nss_gpio, int nss_pin,
 	bmi160_wrapper_set_read_callback(&m_bmi_state, imu_read_callback);
 }
 
-void imu_init_lsm6ds3(stm32_gpio_t *sda_gpio, int sda_pin,
-		stm32_gpio_t *scl_gpio, int scl_pin) {
+void imu_init_lsm6ds3() {
+	imu_stop();
 
-	m_i2c_bb.sda_gpio = sda_gpio;
-	m_i2c_bb.sda_pin = sda_pin;
-	m_i2c_bb.scl_gpio = scl_gpio;
-	m_i2c_bb.scl_pin = scl_pin;
-	m_i2c_bb.rate = I2C_BB_RATE_400K;
-	i2c_bb_init(&m_i2c_bb);
-
-	lsm6ds3_init(&m_i2c_bb, m_thd_work_area, sizeof(m_thd_work_area));
+	lsm6ds3_init(m_thd_work_area, sizeof(m_thd_work_area));
 	lsm6ds3_set_read_callback(imu_read_callback);
-
 }
 
 void imu_stop(void) {
@@ -631,20 +586,20 @@ static void imu_read_callback(float *accel, float *gyro, float *mag) {
 }
 
 static int8_t user_i2c_read(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, uint16_t len) {
-	m_i2c_bb.has_error = 0;
+    uint8_t txbuf[1];
+    txbuf[0] = reg_addr;
 
-	uint8_t txbuf[1];
-	txbuf[0] = reg_addr;
-	return i2c_bb_tx_rx(&m_i2c_bb, dev_addr, txbuf, 1, data, len) ? BMI160_OK : BMI160_E_COM_FAIL;
+    // Use hardware I2C
+    return hw_i2c_tx_rx(dev_addr, txbuf, 1, data, len) ? BMI160_OK : BMI160_E_COM_FAIL;
 }
 
 static int8_t user_i2c_write(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, uint16_t len) {
-	m_i2c_bb.has_error = 0;
+    uint8_t txbuf[len + 1];
+    txbuf[0] = reg_addr;
+    memcpy(txbuf + 1, data, len);
 
-	uint8_t txbuf[len + 1];
-	txbuf[0] = reg_addr;
-	memcpy(txbuf + 1, data, len);
-	return i2c_bb_tx_rx(&m_i2c_bb, dev_addr, txbuf, len + 1, 0, 0) ? BMI160_OK : BMI160_E_COM_FAIL;
+    // Use hardware I2C
+    return hw_i2c_tx_rx(dev_addr, txbuf, len + 1, 0, 0) ? BMI160_OK : BMI160_E_COM_FAIL;
 }
 
 static int8_t user_spi_read(uint8_t dev_id, uint8_t reg_addr, uint8_t *data, uint16_t len) {

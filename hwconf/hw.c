@@ -99,7 +99,7 @@ void hw_setup_adc_channel_helper(ADC_TypeDef* ADCx, uint8_t ADC_Channel, uint8_t
 	// Sequence
 	if (Rank < 5)
 	{
-		ADCx->SQR1 |= (uint32_t)ADC_Channel << ((6 * Rank));
+		ADCx->SQR1 |= (uint32_t)ADC_Channel << (6 * Rank);
 	}
 	// For Rank 5 to 9
 	else if (Rank < 13)

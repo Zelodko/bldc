@@ -24,9 +24,7 @@
 #include "hal.h"
 
 // Functions
-void mpu9150_init(stm32_gpio_t *sda_gpio, int sda_pin,
-		stm32_gpio_t *scl_gpio, int scl_pin,
-		stkline_t *work_area, size_t work_area_size);
+void mpu9150_init(stkline_t *work_area, size_t work_area_size);
 void mpu9150_stop(void);
 bool mpu9150_is_mpu9250(void);
 void mpu9150_cmd_print(BaseSequentialStream *chp, int argc, char *argv[]);

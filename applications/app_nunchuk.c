@@ -71,7 +71,7 @@ void app_nunchuk_stop(void) {
 	stop_now = true;
 
 	if (is_running) {
-		hw_stop_i2c();
+		// hw_stop_i2c();
 	}
 
 	while (is_running) {

@@ -18,6 +18,7 @@
     */
 
 #include "bmi160_wrapper.h"
+#include "hw.h"
 #include "utils_math.h"
 
 #include <stdio.h>

@@ -28,7 +28,7 @@
 /*
  * Board identifier.
  */
-#define BOARD_NAME                  "VESC STM32H753 Nucleo"
+#define BOARD_NAME                  "VESC STM32H743"
 
 /*
  * Board oscillators-related settings.
@@ -41,10 +41,10 @@
 #define STM32_LSEDRV                (3U << 3U)
 
 #if !defined(STM32_HSECLK)
-#define STM32_HSECLK                8000000U
+#define STM32_HSECLK                25000000U
 #endif
 
-#define STM32_HSE_BYPASS
+//#define STM32_HSE_BYPASS
 
 
 
@@ -62,7 +62,7 @@
  * MCU type as defined in the ST header.
  */
 
-#define STM32H753xx
+#define STM32H743xx
 
 #if !defined(_FROM_ASM_)
 #ifdef __cplusplus

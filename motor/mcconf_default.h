@@ -449,13 +449,13 @@
 #define MCCONF_FOC_OFFSETS_CAL_MODE		1 // Offset calibration mode
 #endif
 #ifndef MCCONF_FOC_OFFSETS_CURRENT_0
-#define MCCONF_FOC_OFFSETS_CURRENT_0	2048.0 // Current 0 offset
+#define MCCONF_FOC_OFFSETS_CURRENT_0	32768.0 // Current 0 offset
 #endif
 #ifndef MCCONF_FOC_OFFSETS_CURRENT_1
-#define MCCONF_FOC_OFFSETS_CURRENT_1	2048.0 // Current 1 offset
+#define MCCONF_FOC_OFFSETS_CURRENT_1	32768.0 // Current 1 offset
 #endif
 #ifndef MCCONF_FOC_OFFSETS_CURRENT_2
-#define MCCONF_FOC_OFFSETS_CURRENT_2	2048.0 // Current 2 offset
+#define MCCONF_FOC_OFFSETS_CURRENT_2	32768.0 // Current 2 offset
 #endif
 #ifndef MCCONF_FOC_OFFSETS_VOLTAGE_0
 #define MCCONF_FOC_OFFSETS_VOLTAGE_0	0.0 // Voltage 0 offset

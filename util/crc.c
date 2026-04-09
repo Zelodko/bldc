@@ -69,6 +69,7 @@ unsigned short crc16(unsigned char *buf, unsigned int len) {
   * @param  BufferLength: length of the buffer to be computed
   * @retval 32-bit CRC
   */
+__attribute__((section(".itcm_text")))
 uint32_t crc32(uint32_t *pBuffer, uint32_t BufferLength) {
 	uint32_t index = 0;
 
@@ -88,7 +89,7 @@ void crc32_reset(void) {
 	/* Reset CRC generator */
 	CRC->CR |= CRC_CR_RESET;
 }
-
+__attribute__((section(".itcm_text")))
 uint32_t crc32_with_init(const uint8_t *buf, uint32_t len, uint32_t cksum) {
 	cksum = ~cksum;
 

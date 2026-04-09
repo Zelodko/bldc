@@ -282,9 +282,14 @@ uint32_t flash_helper_verify_flash_memory(void) {
 		// Write the flag to indicate CRC has been computed.
 		uint32_t buffer = APP_CRC_WAS_CALCULATED_FLAG;
 		volatile uint32_t address =  (uint32_t)APP_CRC_WAS_CALCULATED_FLAG_ADDRESS;
+		__disable_irq();
+		SCB_CleanInvalidateDCache();
+		SCB_DisableDCache();
 		SCB_DisableICache();
 		uint16_t res = HAL_FLASH_Program(address,(uint8_t *)&buffer, 4);
 		SCB_EnableICache();
+		SCB_EnableDCache();
+		__enable_irq();
 				//efl_lld_program(&EFLD1, address, 4, (uint8_t *)&buffer);
 		if (res != FLASH_NO_ERROR) {
 			HAL_FLASH_Lock();
@@ -321,9 +326,15 @@ uint32_t flash_helper_verify_flash_memory(void) {
 
 		//Store CRC
 		address = (uint32_t)APP_CRC_ADDRESS;
+		__disable_irq();
+		SCB_CleanInvalidateDCache();
+		SCB_DisableDCache();
 		SCB_DisableICache();
 		res = HAL_FLASH_Program(address,(uint8_t *)&crc, 4);
 		SCB_EnableICache();
+		SCB_EnableDCache();
+		__enable_irq();
+
 				//efl_lld_program(&EFLD1, address, 4, (uint8_t *)&crc);
 		if (res != FLASH_NO_ERROR) {
 			HAL_FLASH_Lock();
@@ -381,7 +392,7 @@ uint32_t flash_helper_verify_flash_memory_chunk(void) {
 
 	return res;
 }
-
+__attribute__((section(".itcm_text")))
 static uint16_t erase_sector(uint32_t sector) {
 	uint16_t res = FLASH_NO_ERROR;
 
@@ -397,8 +408,10 @@ static uint16_t erase_sector(uint32_t sector) {
 
 	HAL_FLASH_Unlock();
 
-	SCB_DisableICache();
+	__disable_irq();
+	SCB_CleanInvalidateDCache();
 	SCB_DisableDCache();
+	SCB_DisableICache();
 	if(sector > 7){
 		res = HAL_FLASH_Erase(2, sector-8, 1);
 	} else {
@@ -406,6 +419,7 @@ static uint16_t erase_sector(uint32_t sector) {
 	}
 	SCB_EnableICache();
 	SCB_EnableDCache();
+	__enable_irq();
 
 	HAL_FLASH_Lock();
 
@@ -420,7 +434,7 @@ uint16_t flash_helper_write_code(int ind, uint32_t offset, uint8_t *data, uint32
 	code_checks[ind].ok = false;
 	return write_data(flash_addr[code_sectors[ind]] + offset, data, len);
 }
-
+__attribute__((section(".itcm_text")))
 static uint16_t write_data(uint32_t base, uint8_t *data, uint32_t len) {
 	mc_interface_ignore_input_both(5000);
 	mc_interface_release_motor_override_both();

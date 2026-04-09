@@ -2,8 +2,10 @@
 #define ISR_VECTOR_TABLE_H_
 
 #define WWDG_IRQHandler         Vector40    /**< Window Watchdog.           */
+#ifndef PVD_IRQHandler
 #define PVD_IRQHandler          Vector44    /**< PVD through EXTI Line
                                                  detect.                    */
+#endif
 #define TAMP_STAMP_IRQHandler   Vector48    /**< Tamper and TimeStamp
                                                  through EXTI Line.         */
 #define RTC_WKUP_IRQHandler     Vector4C    /**< RTC wakeup EXTI Line.      */
@@ -89,7 +91,9 @@
 #define OTG_HS_IRQHandler       Vector174   /**< USB OTG HS.                */
 #define DCMI_IRQHandler         Vector178   /**< DCMI.                      */
 #define CRYP_IRQHandler         Vector17C   /**< CRYP.                      */
+#ifndef HASH_RNG_IRQHandler
 #define HASH_RNG_IRQHandler     Vector180   /**< Hash and Rng.              */
 #define FPU_IRQHandler          Vector184   /**< Floating Point Unit.       */
+#endif
 
 #endif /* ISR_VECTOR_TABLE_H_ */
