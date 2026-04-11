@@ -641,7 +641,7 @@ void terminal_process_string(char *str) {
 #endif
 
 #if defined (V_REG) && defined (VIN_R1) && defined(VIN_R2)
-		commands_printf("Voltage Measurement Range: %.1f V", (double)((V_REG / 65535.0) * 65535.0 * ((VIN_R1 + VIN_R2) / VIN_R2)));
+		commands_printf("Voltage Measurement Range: %.1f V", (double)((V_REG / 4095.0) * 4095.0 * ((VIN_R1 + VIN_R2) / VIN_R2)));
 #endif
 
 #ifdef HW_DEAD_TIME_NSEC

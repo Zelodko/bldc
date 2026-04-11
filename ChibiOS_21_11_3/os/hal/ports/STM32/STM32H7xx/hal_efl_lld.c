@@ -125,28 +125,53 @@ static inline size_t stm32_flash_get_size(void) {
   return *(uint16_t*)((uint32_t) STM32_FLASH_SIZE_REGISTER) * STM32_FLASH_SIZE_SCALE;
 }
 
+
+//changed IV
 static inline flash_error_t stm32_flash_check_errors(EFlashDriver *eflp) {
-  uint32_t sr = eflp->flash->SR1;
+    uint32_t sr = eflp->flash->SR1;
 
-  /* Clearing error conditions.*/
-  eflp->flash->SR1 = sr & 0x0000FFFFU;
+    /* Clear all pending status flags (write 1 to clear) */
+    eflp->flash->SR1 = sr;
 
-  //TODO EM: Rework this to have all the errors
-  /* Some errors are only caught by assertion.*/
-//  osalDbgAssert((sr & (FLASH_SR_FASTERR |
-//                       FLASH_SR_MISERR |
-//                       FLASH_SR_SIZERR)) == 0U, "unexpected flash error");
+    /* --- Hardware / protection errors --- */
+    if (sr & FLASH_SR_WRPERR) {
+        return FLASH_ERROR_HW_FAILURE;
+    }
 
-  /* Decoding relevant errors.*/
-  if ((sr & FLASH_SR_WRPERR) != 0U) {
-    return FLASH_ERROR_HW_FAILURE;
-  }
+    if (sr & (FLASH_SR_RDPERR | FLASH_SR_RDSERR)) {
+        return FLASH_ERROR_HW_FAILURE;
+    }
 
-//  if ((sr & (FLASH_SR_PGAERR | FLASH_SR_PROGERR | FLASH_SR_OPERR)) != 0U) {
-//    return eflp->state == FLASH_PGM ? FLASH_ERROR_PROGRAM : FLASH_ERROR_ERASE;
-//  }
+    /* --- ECC errors --- */
+    if (sr & FLASH_SR_DBECCERR) {
+        /* Double-bit ECC error: uncorrectable */
+        return FLASH_ERROR_HW_FAILURE;
+    }
 
-  return FLASH_NO_ERROR;
+    if (sr & FLASH_SR_SNECCERR) {
+        /* Single-bit ECC corrected: not fatal
+           Optional: log event here */
+    }
+
+    /* --- Programming-related errors --- */
+    if (sr & (FLASH_SR_PGSERR |   /* programming sequence error */
+              FLASH_SR_STRBERR |  /* strobe error */
+              FLASH_SR_INCERR)) { /* inconsistency error */
+
+        return FLASH_ERROR_PROGRAM;
+    }
+
+    /* --- Operation error (erase/program failure) --- */
+    if (sr & FLASH_SR_OPERR) {
+        if (eflp->state == FLASH_ERASE) {
+            return FLASH_ERROR_ERASE;
+        } else {
+            return FLASH_ERROR_PROGRAM;
+        }
+    }
+
+    /* --- No relevant error --- */
+    return FLASH_NO_ERROR;
 }
 
 
@@ -405,36 +430,6 @@ flash_error_t HAL_FLASH_Program(uint32_t FlashAddress,
 	return status;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /**
  * @brief   Low level Embedded Flash driver initialization.
  *
@@ -530,7 +525,10 @@ flash_error_t efl_lld_read(void *instance, flash_offset_t offset,
                                    + offset, n);
 
   /* Checking for errors after reading.*/
-  // TODO EM: not required because of ECC memory?
+  //changed IV
+  /* No explicit read error check required on STM32H7.
+    ECC handles single-bit correction transparently,
+    and double-bit errors trigger a CPU fault. */
 //  if ((devp->flash->SR1 & FLASH_SR_RDERR) != 0U) {
 //    err = FLASH_ERROR_READ;
 //  }
@@ -597,11 +595,11 @@ flash_error_t efl_lld_program(void *instance, flash_offset_t offset,
     line.w[0] = 0xFFFFFFFFU;
     line.w[1] = 0xFFFFFFFFU;
     line.w[2] = 0xFFFFFFFFU;
-	line.w[3] = 0xFFFFFFFFU;
-	line.w[4] = 0xFFFFFFFFU;
-	line.w[5] = 0xFFFFFFFFU;
-	line.w[6] = 0xFFFFFFFFU;
-	line.w[7] = 0xFFFFFFFFU;
+    line.w[3] = 0xFFFFFFFFU;
+    line.w[4] = 0xFFFFFFFFU;
+    line.w[5] = 0xFFFFFFFFU;
+    line.w[6] = 0xFFFFFFFFU;
+    line.w[7] = 0xFFFFFFFFU;
 
     /* Programming address aligned to flash lines.*/
     address = (volatile uint32_t *)(bank->address +
@@ -620,11 +618,11 @@ flash_error_t efl_lld_program(void *instance, flash_offset_t offset,
     address[0] = line.w[0];
     address[1] = line.w[1];
     address[2] = line.w[2];
-	address[3] = line.w[3];
-	address[4] = line.w[4];
-	address[5] = line.w[5];
-	address[6] = line.w[6];
-	address[7] = line.w[7];
+    address[3] = line.w[3];
+    address[4] = line.w[4];
+    address[5] = line.w[5];
+    address[6] = line.w[6];
+    address[7] = line.w[7];
 
     stm32_flash_wait_busy(devp);
     err = stm32_flash_check_errors(devp);
@@ -749,22 +747,20 @@ flash_error_t efl_lld_query_erase(void *instance, uint32_t *msec) {
   /* If there is an erase in progress then the device must be checked.*/
   if (devp->state == FLASH_ERASE) {
 
+    //changed IV
     /* Checking for operation in progress.*/
-    if ((devp->flash->SR1 & FLASH_SR_BSY) == 0U) {
+    if (((devp->flash->SR1 & FLASH_SR_BSY) == 0U) &&
+        ((devp->flash->SR2 & FLASH_SR_BSY) == 0U)) {
 
-    	// TODO EM: Fix
-//      /* Disabling the various erase control bits.*/
-//      devp->flash->CR1 &= ~(FLASH_CR_MER1 |
-//#if defined(FLASH_CR_MER2)
-//                           FLASH_CR_MER2 |
-//#endif
-//                           FLASH_CR_PER);
+        /* Erase finished → clear erase configuration (both banks for safety) */
+        devp->flash->CR1 &= ~(FLASH_CR_SER | FLASH_CR_SNB | FLASH_CR_BER);
+        devp->flash->CR2 &= ~(FLASH_CR_SER | FLASH_CR_SNB | FLASH_CR_BER);
 
-      /* No operation in progress, checking for errors.*/
-      err = stm32_flash_check_errors(devp);
+        /* Check for errors */
+        err = stm32_flash_check_errors(devp);
 
-      /* Back to ready state.*/
-      devp->state = FLASH_READY;
+        /* Back to ready state */
+        devp->state = FLASH_READY;
     }
     else {
       /* Recommended time before polling again. This is a simplified

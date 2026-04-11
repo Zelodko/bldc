@@ -122,17 +122,17 @@
 #define ADC_VOLTS_INPUT_FACTOR	        1.0135
 
 // Input voltage
-#define GET_INPUT_VOLTAGE()		((V_REG / 65535.0) * (float)ADC_Value[ADC_IND_VIN_SENS] * ((VIN_R1 + VIN_R2) / VIN_R2)) * ADC_VOLTS_INPUT_FACTOR
+#define GET_INPUT_VOLTAGE()		((V_REG / 4095.0) * (float)ADC_Value[ADC_IND_VIN_SENS] * ((VIN_R1 + VIN_R2) / VIN_R2)) * ADC_VOLTS_INPUT_FACTOR
 
 // NTC Termistors
-#define NTC_RES(adc_val) (((adc_val) < 1 || (adc_val) > 65535.0) ? 10000.0 : ((65535.0 * 10000.0) / (adc_val) - 10000.0))
+#define NTC_RES(adc_val) (((adc_val) < 1 || (adc_val) > 4095.0) ? 10000.0 : ((4095.0 * 10000.0) / (adc_val) - 10000.0))
 #define NTC_TEMP(adc_ind) (1.0 / ((logf(NTC_RES(ADC_Value[adc_ind]) / 10000.0) / 3455.0) + (1.0 / 298.15)) - 273.15)
 
-#define NTC_RES_MOTOR(adc_val)	(10000.0 / ((65535.0 / (float)adc_val) - 1.0))
+#define NTC_RES_MOTOR(adc_val)	(10000.0 / ((4095.0 / (float)adc_val) - 1.0))
 #define NTC_TEMP_MOTOR(beta)	(1.0 / ((logf(NTC_RES_MOTOR(ADC_Value[ADC_IND_TEMP_MOTOR]) / 10000.0) / beta) + (1.0 / 298.15)) - 273.15)
 
 // Voltage on ADC channel
-#define ADC_VOLTS(ch)			((float)ADC_Value[ch] / 65536.0 * V_REG)
+#define ADC_VOLTS(ch)			((float)ADC_Value[ch] / 4096.0 * V_REG)
 
 // COMM-port ADC GPIOs
 #define HW_ADC_EXT_GPIO			GPIOA
@@ -273,13 +273,13 @@
 #define MCCONF_FOC_OFFSETS_CAL_ON_BOOT	false // Don't Measure offsets every boot, it is done once at motor setup
 
 
-#define MCCONF_FOC_OFFSETS_CURRENT_0	33158.0 // Current 0 offset
-#define MCCONF_FOC_OFFSETS_CURRENT_1	33030.0 // Current 1 offset
-#define MCCONF_FOC_OFFSETS_CURRENT_2	32983.0 // Current 2 offset
+//#define MCCONF_FOC_OFFSETS_CURRENT_0	33158.0 // Current 0 offset
+//#define MCCONF_FOC_OFFSETS_CURRENT_1	33030.0 // Current 1 offset
+//define MCCONF_FOC_OFFSETS_CURRENT_2	32983.0 // Current 2 offset
 
-#define CURRENT_CAL1				    0.915
-#define CURRENT_CAL2				    0.952
-#define CURRENT_CAL3				    0.92
+//#define CURRENT_CAL1				    0.915
+//#define CURRENT_CAL2				    0.952
+//#define CURRENT_CAL3				    0.92
 
 
 

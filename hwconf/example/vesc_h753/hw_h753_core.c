@@ -438,12 +438,12 @@ void hw_setup_adc_channels(void) {
 	ADC3->PCSEL = ADC_PCSEL_PCSEL_10 | ADC_PCSEL_PCSEL_11 | ADC_PCSEL_PCSEL_0 | ADC_PCSEL_PCSEL_1;
 
 /*
-	hw_setup_inj_adc_channel_helper(ADC1, 7, 1, ADC_SMPR_SMP_8P5);   // CURR1
-	hw_setup_inj_adc_channel_helper(ADC2, 15, 1, ADC_SMPR_SMP_8P5);  // CURR2
-	hw_setup_inj_adc_channel_helper(ADC3, 11, 1, ADC_SMPR_SMP_8P5);  // CURR3
-	hw_setup_inj_adc_channel_helper(ADC1, 7, 2, ADC_SMPR_SMP_8P5);   // CURR1
-	hw_setup_inj_adc_channel_helper(ADC2, 15, 2, ADC_SMPR_SMP_8P5);  // CURR2
-	hw_setup_inj_adc_channel_helper(ADC3, 11, 2, ADC_SMPR_SMP_8P5);  // CURR3
+	hw_setup_inj_adc_channel_helper(ADC1, 7, 1, ADC_SMPR_SMP_16P5);   // CURR1
+	hw_setup_inj_adc_channel_helper(ADC2, 15, 1, ADC_SMPR_SMP_16P5);  // CURR2
+	hw_setup_inj_adc_channel_helper(ADC3, 11, 1, ADC_SMPR_SMP_16P5);  // CURR3
+	hw_setup_inj_adc_channel_helper(ADC1, 7, 2, ADC_SMPR_SMP_16P5);   // CURR1
+	hw_setup_inj_adc_channel_helper(ADC2, 15, 2, ADC_SMPR_SMP_16P5);  // CURR2
+	hw_setup_inj_adc_channel_helper(ADC3, 11, 2, ADC_SMPR_SMP_16P5);  // CURR3
 */
 }
 

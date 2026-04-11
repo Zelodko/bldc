@@ -169,7 +169,7 @@ void enc_ad2s1205_routine(AD2S1205_config_t *cfg) {
 		}
 
 		if (angle_is_correct) {
-			cfg->state.last_enc_angle = ((float) pos * 360.0) / 65536.0;
+			cfg->state.last_enc_angle = ((float) pos * 360.0) / 4096.0;
 		}
 	}
 }

@@ -42,8 +42,7 @@ void worker_execute(void(*func)(void *arg), void *arg) {
 
 void worker_wait(void) {
 	if (m_tp) {
-		// TODO EM: fix
-		//chThdWait(m_tp);
+		chThdWait(m_tp);
 	}
 }
 

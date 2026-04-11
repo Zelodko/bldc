@@ -1460,13 +1460,13 @@ void mcpwm_adc_inj_int_handler(void) {
 #endif
 
 #ifdef INVERTED_SHUNT_POLARITY
-	curr0 = 65535 - curr0;
-	curr1 = 65535 - curr1;
+	curr0 = 4095.0 - curr0;
+	curr1 = 4095.0 - curr1;
 
-	curr0_2 = 65535 - curr0_2;
-	curr1_2 = 65535 - curr1_2;
+	curr0_2 = 4095.0 - curr0_2;
+	curr1_2 = 4095.0 - curr1_2;
 #ifdef HW_HAS_3_SHUNTS
-	curr2 = 65535 - curr2;
+	curr2 = 4095.0 - curr2;
 #endif
 #endif
 

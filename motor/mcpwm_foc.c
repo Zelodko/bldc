@@ -490,10 +490,10 @@ void mcpwm_foc_init(mc_configuration *conf_m1, mc_configuration *conf_m2) {
     ADC2->CFGR = ADC_CFGR_DMNGT_1 | ADC_CFGR_DMNGT_0;
     ADC3->CFGR = ADC_CFGR_DMNGT_1 | ADC_CFGR_DMNGT_0;
 
-    /* 16-bit */
-	ADC1->CFGR &= ~ADC_CFGR_RES;
-	ADC2->CFGR &= ~ADC_CFGR_RES;
-	ADC3->CFGR &= ~ADC_CFGR_RES;
+    /* 12-bit */
+	ADC1->CFGR |= ADC_CFGR_RES_2 | ADC_CFGR_RES_1;
+	ADC2->CFGR |= ADC_CFGR_RES_2 | ADC_CFGR_RES_1;
+	ADC3->CFGR |= ADC_CFGR_RES_2 | ADC_CFGR_RES_1;
 
     /* External trigger TIM2_CC2 falling */
     ADC1->CFGR |= ADC_CFGR_EXTSEL_1 | ADC_CFGR_EXTSEL_0 | ADC_CFGR_EXTEN_1;
@@ -543,7 +543,7 @@ void mcpwm_foc_init(mc_configuration *conf_m1, mc_configuration *conf_m2) {
 #else
 	if (m_motor_1.m_conf->foc_offsets_cal_mode & (1 << 0)) {
 		systime_t cal_start_time = chVTGetSystemTimeX();
-		float cal_start_timeout = 10.0; // TODO EM: Put back to 10
+		float cal_start_timeout = 10.0;
 
 		// Wait for input voltage to rise above minimum voltage
 		while (mc_interface_get_input_voltage_filtered() < m_motor_1.m_conf->l_min_vin) {
@@ -3040,7 +3040,7 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 	float curr1 = 0;
 	float curr2 = 0;
 
-	// Get ADC readings 0-65535
+	// Get ADC readings 0-4095
 	if (is_second_motor) {
 		curr0 = GET_CURRENT1_M2();
 		curr1 = GET_CURRENT2_M2();

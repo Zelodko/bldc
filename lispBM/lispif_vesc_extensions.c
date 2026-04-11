@@ -2847,7 +2847,7 @@ static lbm_value ext_raw_adc_voltage(lbm_value *args, lbm_uint argn) {
 	float scale = ((VIN_R1 + VIN_R2) / VIN_R2) * ADC_VOLTS_PH_FACTOR;
 
 	if (argn == 3 && lbm_dec_as_i32(args[2]) != 0) {
-		scale = 65535.0 / V_REG;
+		scale = 4095.0 / V_REG;
 		ofs1 = 0.0; ofs2 = 0.0; ofs3 = 0.0;
 	}
 
