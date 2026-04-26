@@ -129,32 +129,33 @@ static int8_t detect_all_foc_res[50];
 //		CAN_BTR_SJW(3) | CAN_BTR_TS2(2) | CAN_BTR_TS1(9) | CAN_BTR_BRP(5)
 //};
 
-// TODO EM: FIX
-
-/*
- * Baud 125kbit/s.
- */
 static CANConfig cancfg = {
 #if defined USE_CAN_PROTOCOL
   OPMODE_CAN,
 #else
-  OPMODE_FDCAN,                    /* OP MODE */
+  OPMODE_FDCAN,
 #endif
-  FDCAN_CONFIG_NBTP_NTSEG2(51U) |
-  FDCAN_CONFIG_NBTP_NTSEG1(10U) |
-  FDCAN_CONFIG_NBTP_NBRP(7U),      /* NBTP */
-  FDCAN_CONFIG_DBTP_DSJW(3U) |
-  FDCAN_CONFIG_DBTP_DTSEG2(3U) |
-  FDCAN_CONFIG_DBTP_DTSEG1(10U) |
-  FDCAN_CONFIG_DBTP_DBRP(7U),      /* DBTP */
-  0,                               /* TDCR */
-  0,                               /* CCCR */
-  0,                               /* TEST */
-  0                                /* GFC */
+
+  /* 500 kbit/s @ 25 MHz */
+  FDCAN_CONFIG_NBTP_NSJW(4U)   |
+  FDCAN_CONFIG_NBTP_NTSEG2(5U) |
+  FDCAN_CONFIG_NBTP_NTSEG1(17U) |
+  FDCAN_CONFIG_NBTP_NBRP(1U),
+
+  /* classic CAN, so no data phase */
+  0,
+
+  0,
+  0,
+  0,
+
+  /* accept everything for bring-up */
+  FDCAN_CONFIG_GFC_ANFS_RX_0 |
+  FDCAN_CONFIG_GFC_ANFE_RX_0
 };
 
 // Private functions
-static void set_timing(int brp, int ts1, int ts2);
+static void set_timing(uint16_t nbrp, uint16_t ntseg1, uint16_t ntseg2, uint16_t nsjw);
 #if CAN_ENABLE
 static void send_packet_wrapper(unsigned char *data, unsigned int len);
 static void decode_msg(uint32_t eid, uint8_t *data8, int len, bool is_replaced);
@@ -276,15 +277,15 @@ void comm_can_set_baud(CAN_BAUD baud, int delay_msec) {
 	}
 
 	switch (baud) {
-	case CAN_BAUD_125K:	set_timing(15, 14, 4); break;
-	case CAN_BAUD_250K:	set_timing(7, 14, 4); break;
-	case CAN_BAUD_500K:	set_timing(5, 9, 2); break;
-	case CAN_BAUD_1M:	set_timing(2, 9, 2); break;
-	case CAN_BAUD_10K:	set_timing(299, 10, 1); break;
-	case CAN_BAUD_20K:	set_timing(149, 10, 1); break;
-	case CAN_BAUD_50K:	set_timing(59, 10, 1); break;
-	case CAN_BAUD_75K:	set_timing(39, 10, 1); break;
-	case CAN_BAUD_100K:	set_timing(29, 10, 1); break;
+	case CAN_BAUD_1M:   set_timing(0, 17, 5, 4); break;
+	case CAN_BAUD_500K: set_timing(1, 17, 5, 4); break;
+	case CAN_BAUD_250K: set_timing(3, 17, 5, 4); break;
+	case CAN_BAUD_125K: set_timing(7, 17, 5, 4); break;
+	case CAN_BAUD_100K: set_timing(9, 19, 4, 4); break;
+	case CAN_BAUD_75K:  set_timing(12, 19, 4, 4);  break;
+	case CAN_BAUD_50K:  set_timing(19, 19, 4, 4); break;
+	case CAN_BAUD_20K:  set_timing(49, 19, 4, 4); break;
+	case CAN_BAUD_10K:  set_timing(99, 19, 4, 4); break;
 	default: break;
 	}
 }
@@ -2287,30 +2288,24 @@ static void decode_msg(uint32_t eid, uint8_t *data8, int len, bool is_replaced) 
  * @param ts2
  * TS2.
  */
-static void set_timing(int brp, int ts1, int ts2) {
-	brp &= 0b1111111111;
-	ts1 &= 0b1111;
-	ts2 &= 0b111;
+static void set_timing(uint16_t nbrp, uint16_t ntseg1, uint16_t ntseg2, uint16_t nsjw) {
 
-	cancfg.NBTP = FDCAN_CONFIG_NBTP_NTSEG2(51U) |
-			  FDCAN_CONFIG_NBTP_NTSEG1(10U) |
-			  FDCAN_CONFIG_NBTP_NBRP(7U);
-	cancfg.DBTP = FDCAN_CONFIG_DBTP_DSJW(3U) |
-			  FDCAN_CONFIG_DBTP_DTSEG2(3U) |
-			  FDCAN_CONFIG_DBTP_DTSEG1(10U) |
-			  FDCAN_CONFIG_DBTP_DBRP(7U);
-			// TODO EM: Fix this timing
-		// btr = CAN_BTR_SJW(3) | CAN_BTR_TS2(ts2) |
-		///CAN_BTR_TS1(ts1) | CAN_BTR_BRP(brp);
+    cancfg.NBTP =
+        FDCAN_CONFIG_NBTP_NSJW(nsjw)   |
+        FDCAN_CONFIG_NBTP_NTSEG2(ntseg2) |
+        FDCAN_CONFIG_NBTP_NTSEG1(ntseg1) |
+        FDCAN_CONFIG_NBTP_NBRP(nbrp);
+
+    cancfg.DBTP = 0; // classic CAN
 
 #ifdef HW_CAN2_DEV
-	canStop(&CAND1);
-	canStart(&CAND1, &cancfg);
-	canStop(&CAND2);
-	canStart(&CAND2, &cancfg);
+    canStop(&CAND1);
+    canStart(&CAND1, &cancfg);
+    canStop(&CAND2);
+    canStart(&CAND2, &cancfg);
 #else
-	canStop(&HW_CAN_DEV);
-	canStart(&HW_CAN_DEV, &cancfg);
+    canStop(&HW_CAN_DEV);
+    canStart(&HW_CAN_DEV, &cancfg);
 #endif
 }
 
