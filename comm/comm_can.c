@@ -94,6 +94,15 @@ static thread_t *ping_tp = 0;
 static volatile HW_TYPE ping_hw_last = HW_TYPE_VESC;
 static volatile int ping_hw_last_id = -1;
 static volatile bool init_done = false;
+
+// FDCAN has no equivalent of bxCAN's automatic bus-off recovery (ABOM), so
+// it has to be done in software here. See recover_bus_off().
+static volatile unsigned int can_bus_off_cnt = 0;
+static volatile unsigned int can_overflow_cnt = 0;
+#ifdef HW_CAN2_DEV
+static volatile unsigned int can_bus_off_cnt2 = 0;
+static volatile unsigned int can_overflow_cnt2 = 0;
+#endif
 #endif
 
 // Variables
@@ -310,15 +319,20 @@ void comm_can_set_baud(CAN_BAUD baud, int delay_msec) {
  * 0: Both
  * 1: CAN1
  * 2: CAN2
+ *
+ * @return
+ * MSG_OK for success, anything else otherwise.
  */
-void comm_can_transmit_eid_replace(uint32_t id, const uint8_t *data, uint8_t len, bool replace, int interface) {
+msg_t comm_can_transmit_eid_replace(uint32_t id, const uint8_t *data, uint8_t len, bool replace, int interface) {
 	if (len > 8) {
 		len = 8;
 	}
 
+	msg_t ret = MSG_TIMEOUT;
+
 #if CAN_ENABLE
 	if (!init_done) {
-		return;
+		return MSG_RESET;
 	}
 
 #ifdef HW_HAS_DUAL_MOTORS
@@ -328,7 +342,7 @@ void comm_can_transmit_eid_replace(uint32_t id, const uint8_t *data, uint8_t len
 			uint8_t data_tmp[10];
 			memcpy(data_tmp, data, len);
 			decode_msg(id, data_tmp, len, true);
-			return;
+			return MSG_OK;
 		}
 	}
 #else
@@ -349,18 +363,19 @@ void comm_can_transmit_eid_replace(uint32_t id, const uint8_t *data, uint8_t len
 			msg_t ok = canTransmit(&HW_CAN_DEV, CAN_ANY_MAILBOX, &txmsg, TIME_IMMEDIATE);
 			msg_t ok2 = canTransmit(&HW_CAN2_DEV, CAN_ANY_MAILBOX, &txmsg, TIME_IMMEDIATE);
 			if (ok == MSG_OK || ok2 == MSG_OK) {
+				ret = MSG_OK;
 				break;
 			}
 			chThdSleepMicroseconds(500);
 		}
 	} else if (interface == 1) {
-		canTransmit(&HW_CAN_DEV, CAN_ANY_MAILBOX, &txmsg, TIME_MS2I(5));
+		ret = canTransmit(&HW_CAN_DEV, CAN_ANY_MAILBOX, &txmsg, TIME_MS2I(5));
 	} else if (interface == 2) {
-		canTransmit(&HW_CAN2_DEV, CAN_ANY_MAILBOX, &txmsg, TIME_MS2I(5));
+		ret = canTransmit(&HW_CAN2_DEV, CAN_ANY_MAILBOX, &txmsg, TIME_MS2I(5));
 	}
 #else
 	(void)interface;
-	canTransmit(&HW_CAN_DEV, CAN_ANY_MAILBOX, &txmsg, TIME_MS2I(5));
+	ret = canTransmit(&HW_CAN_DEV, CAN_ANY_MAILBOX, &txmsg, TIME_MS2I(5));
 #endif
 	chMtxUnlock(&can_mtx);
 #else
@@ -370,24 +385,27 @@ void comm_can_transmit_eid_replace(uint32_t id, const uint8_t *data, uint8_t len
 	(void)replace;
 	(void)interface;
 #endif
+	return ret;
 }
 
-void comm_can_transmit_eid(uint32_t id, const uint8_t *data, uint8_t len) {
-	comm_can_transmit_eid_replace(id, data, len, false, 0);
+msg_t comm_can_transmit_eid(uint32_t id, const uint8_t *data, uint8_t len) {
+	return comm_can_transmit_eid_replace(id, data, len, false, 0);
 }
 
-void comm_can_transmit_eid_if(uint32_t id, const uint8_t *data, uint8_t len, int interface) {
-	comm_can_transmit_eid_replace(id, data, len, false, interface);
+msg_t comm_can_transmit_eid_if(uint32_t id, const uint8_t *data, uint8_t len, int interface) {
+	return comm_can_transmit_eid_replace(id, data, len, false, interface);
 }
 
-void comm_can_transmit_sid(uint32_t id, const uint8_t *data, uint8_t len) {
+msg_t comm_can_transmit_sid(uint32_t id, const uint8_t *data, uint8_t len) {
 	if (len > 8) {
 		len = 8;
 	}
 
+	msg_t ret = MSG_TIMEOUT;
+
 #if CAN_ENABLE
 	if (!init_done) {
-		return;
+		return MSG_RESET;
 	}
 
 	CANTxFrame txmsg;
@@ -403,12 +421,13 @@ void comm_can_transmit_sid(uint32_t id, const uint8_t *data, uint8_t len) {
 		msg_t ok = canTransmit(&HW_CAN_DEV, CAN_ANY_MAILBOX, &txmsg, TIME_IMMEDIATE);
 		msg_t ok2 = canTransmit(&HW_CAN2_DEV, CAN_ANY_MAILBOX, &txmsg, TIME_IMMEDIATE);
 		if (ok == MSG_OK || ok2 == MSG_OK) {
+			ret = MSG_OK;
 			break;
 		}
 		chThdSleepMicroseconds(500);
 	}
 #else
-	canTransmit(&HW_CAN_DEV, CAN_ANY_MAILBOX, &txmsg, TIME_MS2I(5));
+	ret = canTransmit(&HW_CAN_DEV, CAN_ANY_MAILBOX, &txmsg, TIME_MS2I(5));
 #endif
 	chMtxUnlock(&can_mtx);
 #else
@@ -416,6 +435,7 @@ void comm_can_transmit_sid(uint32_t id, const uint8_t *data, uint8_t len) {
 	(void)data;
 	(void)len;
 #endif
+	return ret;
 }
 
 /**
@@ -823,6 +843,34 @@ int comm_can_detect_all_foc_res_size(void) {
 
 void comm_can_detect_all_foc_res_clear(void) {
 	detect_all_foc_res_index = 0;
+}
+
+unsigned int comm_can_get_bus_off_cnt(int interface) {
+#if CAN_ENABLE
+#ifdef HW_CAN2_DEV
+	return interface == 2 ? can_bus_off_cnt2 : can_bus_off_cnt;
+#else
+	(void)interface;
+	return can_bus_off_cnt;
+#endif
+#else
+	(void)interface;
+	return 0;
+#endif
+}
+
+unsigned int comm_can_get_overflow_cnt(int interface) {
+#if CAN_ENABLE
+#ifdef HW_CAN2_DEV
+	return interface == 2 ? can_overflow_cnt2 : can_overflow_cnt;
+#else
+	(void)interface;
+	return can_overflow_cnt;
+#endif
+#else
+	(void)interface;
+	return 0;
+#endif
 }
 
 void comm_can_conf_battery_cut(uint8_t controller_id,
@@ -1299,26 +1347,68 @@ void comm_can_send_status6(uint8_t id, bool replace) {
 }
 
 #if CAN_ENABLE
+// FDCAN does not automatically recover from bus-off the way bxCAN's ABOM
+// bit did on F4 - the Bosch M_CAN core FDCAN is built on requires software
+// to re-initialize the peripheral to restart the (hardware-monitored)
+// bus-off recovery sequence. This is done under can_mtx so it can't race
+// with an in-flight comm_can_transmit_*() call, and with a short settle
+// delay so a persistent fault doesn't hammer the peripheral with restarts.
+// If the fault clears, this brings CAN back up on its own, same as ABOM
+// would have - if it doesn't, this just keeps quietly retrying.
+static void recover_bus_off(CANDriver *canp) {
+	chMtxLock(&can_mtx);
+	canStop(canp);
+	chThdSleepMilliseconds(100);
+	canStart(canp, &cancfg);
+	chMtxUnlock(&can_mtx);
+}
+
 static THD_FUNCTION(cancom_read_thread, arg) {
 	(void)arg;
 	chRegSetThreadName("CAN read");
 
 	event_listener_t el;
+	event_listener_t el_err;
 	CANRxFrame rxmsg;
 
 	chEvtRegister(&HW_CAN_DEV.rxfull_event, &el, 0);
+	chEvtRegisterMaskWithFlags(&HW_CAN_DEV.error_event, &el_err, (eventmask_t)2,
+			CAN_BUS_OFF_ERROR | CAN_OVERFLOW_ERROR);
 #ifdef HW_CAN2_DEV
 	event_listener_t el2;
+	event_listener_t el_err2;
 	chEvtRegister(&HW_CAN2_DEV.rxfull_event, &el2, 0);
+	chEvtRegisterMaskWithFlags(&HW_CAN2_DEV.error_event, &el_err2, (eventmask_t)2,
+			CAN_BUS_OFF_ERROR | CAN_OVERFLOW_ERROR);
 #endif
 
 	while(!chThdShouldTerminateX()) {
 		// Feed watchdog
 		timeout_feed_WDT(THREAD_CANBUS);
-        
+
 		if (chEvtWaitAnyTimeout(ALL_EVENTS, TIME_MS2I(10)) == 0) {
 			continue;
 		}
+
+		eventflags_t err_flags = chEvtGetAndClearFlags(&el_err);
+		if (err_flags & CAN_OVERFLOW_ERROR) {
+			can_overflow_cnt++;
+		}
+		if (err_flags & CAN_BUS_OFF_ERROR) {
+			can_bus_off_cnt++;
+			recover_bus_off(&HW_CAN_DEV);
+		}
+
+#ifdef HW_CAN2_DEV
+		eventflags_t err_flags2 = chEvtGetAndClearFlags(&el_err2);
+		if (err_flags2 & CAN_OVERFLOW_ERROR) {
+			can_overflow_cnt2++;
+		}
+		if (err_flags2 & CAN_BUS_OFF_ERROR) {
+			can_bus_off_cnt2++;
+			recover_bus_off(&HW_CAN2_DEV);
+		}
+#endif
 
 		msg_t result = canReceive(&HW_CAN_DEV, CAN_ANY_MAILBOX, &rxmsg, TIME_IMMEDIATE);
 
@@ -1354,9 +1444,44 @@ static THD_FUNCTION(cancom_read_thread, arg) {
 	}
 
 	chEvtUnregister(&HW_CAN_DEV.rxfull_event, &el);
+	chEvtUnregister(&HW_CAN_DEV.error_event, &el_err);
 #ifdef HW_CAN2_DEV
 	chEvtUnregister(&HW_CAN2_DEV.rxfull_event, &el2);
+	chEvtUnregister(&HW_CAN2_DEV.error_event, &el_err2);
 #endif
+}
+
+static void process_frame_vesc(CANRxFrame rxmsg) {
+	if (rxmsg.common.IDE == CAN_IDE_EXT) {
+		bool eid_cb_used = false;
+		if (eid_callback) {
+			eid_cb_used = eid_callback(rxmsg.ext.EID, rxmsg.data8, rxmsg.DLC);
+		}
+
+		if (!eid_cb_used) {
+			if (!bms_process_can_frame(rxmsg.ext.EID, rxmsg.data8, rxmsg.DLC, true)) {
+				decode_msg(rxmsg.ext.EID, rxmsg.data8, rxmsg.DLC, false);
+#ifdef USE_LISPBM
+				lispif_process_can(rxmsg.ext.EID, rxmsg.data8, rxmsg.DLC, true);
+#endif
+			}
+		}
+	} else {
+		bool sid_cb_used = false;
+		if (sid_callback) {
+			sid_cb_used = sid_callback(rxmsg.std.SID, rxmsg.data8, rxmsg.DLC);
+		}
+
+		if (!sid_cb_used) {
+			sid_cb_used = bms_process_can_frame(rxmsg.std.SID, rxmsg.data8, rxmsg.DLC, false);
+		}
+
+#ifdef USE_LISPBM
+		if (!sid_cb_used) {
+			lispif_process_can(rxmsg.std.SID, rxmsg.data8, rxmsg.DLC, false);
+		}
+#endif
+	}
 }
 
 static THD_FUNCTION(cancom_process_thread, arg) {
@@ -1412,40 +1537,27 @@ static THD_FUNCTION(cancom_process_thread, arg) {
 		}
 
 		CANRxFrame *rxmsg_tmp;
-		while ((rxmsg_tmp = comm_can_get_rx_frame(0)) != 0) {
-			CANRxFrame rxmsg = *rxmsg_tmp;
-
-			if (rxmsg.common.IDE == CAN_IDE_EXT) {
-				bool eid_cb_used = false;
-				if (eid_callback) {
-					eid_cb_used = eid_callback(rxmsg.ext.EID, rxmsg.data8, rxmsg.DLC);
-				}
-
-				if (!eid_cb_used) {
-					if (!bms_process_can_frame(rxmsg.ext.EID, rxmsg.data8, rxmsg.DLC, true)) {
-						decode_msg(rxmsg.ext.EID, rxmsg.data8, rxmsg.DLC, false);
-#ifdef USE_LISPBM
-						lispif_process_can(rxmsg.ext.EID, rxmsg.data8, rxmsg.DLC, true);
-#endif
-					}
+		while ((rxmsg_tmp = comm_can_get_rx_frame(1)) != 0) {
+			if (app_get_configuration()->can_mode == CAN_MODE_VESC_UAVCAN) {
+				if (canard_process_frame(rxmsg_tmp, 1) != 0) {
+					process_frame_vesc(*rxmsg_tmp);
 				}
 			} else {
-				bool sid_cb_used = false;
-				if (sid_callback) {
-					sid_cb_used = sid_callback(rxmsg.std.SID, rxmsg.data8, rxmsg.DLC);
-				}
-
-				if (!sid_cb_used) {
-					sid_cb_used = bms_process_can_frame(rxmsg.std.SID, rxmsg.data8, rxmsg.DLC, false);
-				}
-
-#ifdef USE_LISPBM
-				if (!sid_cb_used) {
-					lispif_process_can(rxmsg.std.SID, rxmsg.data8, rxmsg.DLC, false);
-				}
-#endif
+				process_frame_vesc(*rxmsg_tmp);
 			}
 		}
+
+#ifdef HW_CAN2_DEV
+		while ((rxmsg_tmp = comm_can_get_rx_frame(2)) != 0) {
+			if (app_get_configuration()->can_mode == CAN_MODE_VESC_UAVCAN) {
+				if (canard_process_frame(rxmsg_tmp, 2) != 0) {
+					process_frame_vesc(*rxmsg_tmp);
+				}
+			} else {
+				process_frame_vesc(*rxmsg_tmp);
+			}
+		}
+#endif
 	}
 }
 
@@ -2244,17 +2356,19 @@ static void decode_msg(uint32_t eid, uint8_t *data8, int len, bool is_replaced) 
 	} break;
 
 	case CAN_PACKET_UPDATE_BAUD: {
-		ind = 0;
-		int kbits = buffer_get_int16(data8, &ind);
-		int delay_msec = buffer_get_int16(data8, &ind);
+		if (len == 4) {
+			ind = 0;
+			int kbits = buffer_get_int16(data8, &ind);
+			int delay_msec = buffer_get_int16(data8, &ind);
 
-		CAN_BAUD baud = comm_can_kbits_to_baud(kbits);
-		if (baud != CAN_BAUD_INVALID) {
-			comm_can_set_baud(baud, delay_msec);
+			CAN_BAUD baud = comm_can_kbits_to_baud(kbits);
+			if (baud != CAN_BAUD_INVALID) {
+				comm_can_set_baud(baud, delay_msec);
 
-			app_configuration *appconf = (app_configuration*)app_get_configuration();
-			appconf->can_baud_rate = baud;
-			conf_general_store_app_configuration(appconf);
+				app_configuration *appconf = (app_configuration*)app_get_configuration();
+				appconf->can_baud_rate = baud;
+				conf_general_store_app_configuration(appconf);
+			}
 		}
 	} break;
 

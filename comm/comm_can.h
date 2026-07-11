@@ -30,10 +30,10 @@
 void comm_can_init(void);
 CAN_BAUD comm_can_kbits_to_baud(int kbits);
 void comm_can_set_baud(CAN_BAUD baud, int delay_msec);
-void comm_can_transmit_eid(uint32_t id, const uint8_t *data, uint8_t len);
-void comm_can_transmit_eid_if(uint32_t id, const uint8_t *data, uint8_t len, int interface);
-void comm_can_transmit_eid_replace(uint32_t id, const uint8_t *data, uint8_t len, bool replace, int interface);
-void comm_can_transmit_sid(uint32_t id, const uint8_t *data, uint8_t len);
+msg_t comm_can_transmit_eid(uint32_t id, const uint8_t *data, uint8_t len);
+msg_t comm_can_transmit_eid_if(uint32_t id, const uint8_t *data, uint8_t len, int interface);
+msg_t comm_can_transmit_eid_replace(uint32_t id, const uint8_t *data, uint8_t len, bool replace, int interface);
+msg_t comm_can_transmit_sid(uint32_t id, const uint8_t *data, uint8_t len);
 void comm_can_set_sid_rx_callback(bool (*p_func)(uint32_t id, uint8_t *data, uint8_t len));
 void comm_can_set_eid_rx_callback(bool (*p_func)(uint32_t id, uint8_t *data, uint8_t len));
 void comm_can_send_buffer(uint8_t controller_id, uint8_t *data, unsigned int len, uint8_t send);
@@ -57,6 +57,8 @@ void comm_can_conf_foc_erpms(uint8_t controller_id,
 int comm_can_detect_all_foc_res(unsigned int index);
 int comm_can_detect_all_foc_res_size(void);
 void comm_can_detect_all_foc_res_clear(void);
+unsigned int comm_can_get_bus_off_cnt(int interface);
+unsigned int comm_can_get_overflow_cnt(int interface);
 void comm_can_conf_battery_cut(uint8_t controller_id,
 		bool store, float start, float end);
 void comm_can_shutdown(uint8_t controller_id);

@@ -862,6 +862,7 @@ typedef enum {
 	CAN_MODE_UAVCAN,
 	CAN_MODE_COMM_BRIDGE,
 	CAN_MODE_UNUSED,
+	CAN_MODE_VESC_UAVCAN
 } CAN_MODE;
 
 typedef enum {
