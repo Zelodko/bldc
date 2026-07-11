@@ -448,7 +448,14 @@ static uint16_t write_data(uint32_t base, uint8_t *data, uint32_t len) {
 
 	HAL_FLASH_Unlock();
 
+	__disable_irq();
+	SCB_CleanInvalidateDCache();
+	SCB_DisableDCache();
+	SCB_DisableICache();
 	uint16_t res = HAL_FLASH_Program((uint32_t)base, data, len);
+	SCB_EnableICache();
+	SCB_EnableDCache();
+	__enable_irq();
 
 	if (res != FLASH_NO_ERROR) {
 		HAL_FLASH_Lock();

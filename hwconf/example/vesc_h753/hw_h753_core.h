@@ -240,37 +240,61 @@
 #define READ_HALL2()			palReadPad(HW_HALL_ENC_GPIO2, HW_HALL_ENC_PIN2)
 #define READ_HALL3()			palReadPad(HW_HALL_ENC_GPIO3, HW_HALL_ENC_PIN3)
 
-#define HW_DEAD_TIME_NSEC		10.0
+#define HW_DEAD_TIME_NSEC		20.0
+
 
 // Default setting overrides
-#ifndef MCCONF_L_MIN_VOLTAGE
-#define MCCONF_L_MIN_VOLTAGE			60.0		// Minimum input voltage
-#endif
-#ifndef MCCONF_L_MAX_VOLTAGE
-#define MCCONF_L_MAX_VOLTAGE			100.0	// Maximum input voltage
-#endif
-#ifndef MCCONF_DEFAULT_MOTOR_TYPE
-#define MCCONF_DEFAULT_MOTOR_TYPE		MOTOR_TYPE_FOC
-#endif
-#ifndef MCCONF_FOC_F_ZV
-#define MCCONF_FOC_F_ZV					30000.0
-#endif
-#ifndef MCCONF_L_MAX_ABS_CURRENT
-#define MCCONF_L_MAX_ABS_CURRENT		40.0	// The maximum absolute current above which a fault is generated
-#endif
-#ifndef MCCONF_L_CURRENT_MAX
-#define MCCONF_L_CURRENT_MAX			20.0	// Current limit in Amperes (Upper)
-#endif
-#ifndef MCCONF_L_CURRENT_MIN
-#define MCCONF_L_CURRENT_MIN			-20.0	// Current limit in Amperes (Lower)
-#endif
-#ifndef MCCONF_L_IN_CURRENT_MAX
-#define MCCONF_L_IN_CURRENT_MAX			5.0	// Input current limit in Amperes (Upper)
-#endif
-#ifndef MCCONF_L_IN_CURRENT_MIN
-#define MCCONF_L_IN_CURRENT_MIN			-5.0	// Input current limit in Amperes (Lower)
-#endif
-#define MCCONF_FOC_OFFSETS_CAL_ON_BOOT	false // Don't Measure offsets every boot, it is done once at motor setup
+#define MCCONF_L_MIN_VOLTAGE			    60.0		// Minimum input voltage
+
+#define MCCONF_L_MAX_VOLTAGE			    100.0	// Maximum input voltage
+
+#define MCCONF_L_BATTERY_CUT_START		    65.0	// Start limiting the positive current at this voltage
+
+#define MCCONF_L_BATTERY_CUT_END		    60.0		// Limit the positive current completely at this voltage
+
+#define MCCONF_L_BATTERY_REGEN_CUT_START    160.0	// Start limiting the regen current at this voltage
+
+#define MCCONF_L_BATTERY_REGEN_CUT_END      170.0		// Limit the regen current completely at this voltage
+
+#define MCCONF_DEFAULT_MOTOR_TYPE		    MOTOR_TYPE_FOC
+
+#define MCCONF_FOC_F_ZV					    32000.0
+
+#define MCCONF_L_MAX_ABS_CURRENT		    100.0	// The maximum absolute current above which a fault is generated
+
+#define MCCONF_L_CURRENT_MAX			    50.0	// Current limit in Amperes (Upper)
+
+#define MCCONF_L_CURRENT_MIN			    -50.0	 // Current limit in Amperes (Lower)
+
+#define MCCONF_L_SLOW_ABS_OVERCURRENT	    false	// Use the raw current for the overcurrent fault detection
+
+#define MCCONF_L_IN_CURRENT_MAX			    5.0	// Input current limit in Amperes (Upper)
+
+#define MCCONF_L_IN_CURRENT_MIN			    -5.0	// Input current limit in Amperes (Lower)
+
+#define MCCONF_L_MIN_DUTY				    0.005	// Minimum duty cycle
+
+#define MCCONF_L_MAX_DUTY				    0.90	// Maximum duty cycle
+
+#define MCCONF_L_LIM_TEMP_FET_START		    40.0	// MOSFET temperature where current limiting should begin
+
+#define MCCONF_L_LIM_TEMP_FET_END		    60.0	// MOSFET temperature where everything should be shut off
+
+#define MCCONF_M_MOTOR_TEMP_SENS_TYPE       TEMP_SENSOR_DISABLED // Motor Temperature Sensor Type
+
+#define MCCONF_FOC_CURRENT_SAMPLE_MODE	    FOC_CURRENT_SAMPLE_MODE_ALL_SENSORS
+
+#define MCCONF_FOC_DT_US				    0.02    // Microseconds for dead time compensation
+
+#define MCCONF_BMS_TYPE					    BMS_TYPE_NONE
+
+#define MCCONF_FOC_OFFSETS_CAL_MODE         0   // Don't Measure offsets every boot, it is done once at motor setup
+
+#define MCCONF_FOC_PHASE_FILTER_DISABLE_FAULT	false
+
+#define APPCONF_SHUTDOWN_MODE               SHUTDOWN_MODE_TOGGLE_BUTTON_ONLY
+
+#define APPCONF_CAN_BAUD_RATE				CAN_BAUD_1M
 
 
 //#define MCCONF_FOC_OFFSETS_CURRENT_0	33158.0 // Current 0 offset
@@ -284,14 +308,14 @@
 
 
 // Setting limits
-#define HW_LIM_CURRENT			-50.0, 50.0
-#define HW_LIM_CURRENT_IN		-50.0, 50.0
-#define HW_LIM_CURRENT_ABS		0.0, 65.0
-#define HW_LIM_VIN				0.0, 200.0
+#define HW_LIM_CURRENT			-200.0, 200.0
+#define HW_LIM_CURRENT_IN		-100.0, 100.0
+#define HW_LIM_CURRENT_ABS		0.0, 300.0
+#define HW_LIM_VIN				0.0, 180.0
 #define HW_LIM_ERPM				-200e3, 200e3
 #define HW_LIM_DUTY_MIN			0.0, 0.1
-#define HW_LIM_DUTY_MAX			0.0, 0.99
-#define HW_LIM_TEMP_FET			-40.0, 110.0
+#define HW_LIM_DUTY_MAX			0.0, 0.95
+#define HW_LIM_TEMP_FET			-40.0, 90.0
 
 //functions
 bool hw_sample_shutdown_button(void);

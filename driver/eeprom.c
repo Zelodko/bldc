@@ -653,11 +653,6 @@ static uint16_t EE_VerifyPageFullWriteVariable(uint16_t VirtAddress, uint16_t Da
 	/* Get the valid Page end Address */
 	PageEndAddress = (uint32_t)((EEPROM_START_ADDRESS - 1) + (uint32_t)((ValidPage + 1) * PAGE_SIZE));
 
-	__disable_irq();
-SCB_CleanInvalidateDCache();
-SCB_DisableDCache();
-SCB_DisableICache();
-
 	/* Check each active page address starting from beginning */
 	while (Address < PageEndAddress)
 	{
@@ -665,15 +660,30 @@ SCB_DisableICache();
 		if ((*(__IO uint32_t*)Address) == 0xFFFFFFFF)
 		{
 			/* Set variable data */
+			__disable_irq();
+			SCB_CleanInvalidateDCache();
+			SCB_DisableDCache();
+			SCB_DisableICache();
 			FlashStatus = HAL_FLASH_Program(Address, ((uint8_t*)&data32), 8*4);
+			SCB_EnableICache();
+			SCB_EnableDCache();
+			__enable_irq();
 
 			/* If program operation was failed, a Flash error code is returned */
 			if (FlashStatus != FLASH_NO_ERROR)
 			{
 				return FlashStatus;
 			}
+
 			/* Set variable virtual address */
+			__disable_irq();
+			SCB_CleanInvalidateDCache();
+			SCB_DisableDCache();
+			SCB_DisableICache();
 			FlashStatus = HAL_FLASH_Program(Address + 32, ((uint8_t*)&VirtAddress1), 8*4);
+			SCB_EnableICache();
+			SCB_EnableDCache();
+			__enable_irq();
 
 			/* Return program operation status */
 			return FlashStatus;
@@ -684,9 +694,6 @@ SCB_DisableICache();
 			Address = Address + 64;
 		}
 	}
-	SCB_EnableICache();
-SCB_EnableDCache();
-__enable_irq();
 
 	/* Return PAGE_FULL in case the valid page is full */
 	return PAGE_FULL;

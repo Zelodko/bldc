@@ -282,16 +282,16 @@ int main(void) {
 	//LED_GREEN_OFF();
 	//PIN_TEST_ON();
 	conf_general_init();
-//	volatile uint32_t result = flash_helper_verify_flash_memory();
-//	if (result == FAULT_CODE_FLASH_CORRUPTION)	{
-//		// Loop here, it is not safe to run any code
-//		while (1) {
-//			chThdSleepMilliseconds(100);
-//			LED_RED_ON();
-//			chThdSleepMilliseconds(75);
-//			LED_RED_OFF();
-//		}
-//	}
+	volatile uint32_t result = flash_helper_verify_flash_memory();
+	if (result == FAULT_CODE_FLASH_CORRUPTION)	{
+		// Loop here, it is not safe to run any code
+		while (1) {
+			chThdSleepMilliseconds(100);
+			LED_RED_ON();
+			chThdSleepMilliseconds(75);
+			LED_RED_OFF();
+		}
+	}
 
 	ledpwm_init();
 	mc_interface_init();
@@ -334,7 +334,7 @@ int main(void) {
 	// Threads
 	chThdCreateStatic(led_thread_wa, sizeof(led_thread_wa), NORMALPRIO, led_thread, NULL);
 	chThdCreateStatic(periodic_thread_wa, sizeof(periodic_thread_wa), NORMALPRIO, periodic_thread, NULL);
-//	chThdCreateStatic(flash_integrity_check_thread_wa, sizeof(flash_integrity_check_thread_wa), LOWPRIO, flash_integrity_check_thread, NULL);
+	chThdCreateStatic(flash_integrity_check_thread_wa, sizeof(flash_integrity_check_thread_wa), LOWPRIO, flash_integrity_check_thread, NULL);
 
 	timeout_init();
 	timeout_configure(appconf->timeout_msec, appconf->timeout_brake_current, appconf->kill_sw_mode);

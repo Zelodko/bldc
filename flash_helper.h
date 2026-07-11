@@ -32,16 +32,16 @@
 #define FLASH_SECTORS							16 // Flash has 2 banks of 8x 128k sectors
 #define BOOTLOADER_BASE							14
 #define APP_BASE								0
-#define NEW_APP_BASE							4
-#define NEW_APP_SECTORS							4
-#define APP_MAX_SIZE							(1024 * 128 * 4 - 8) // Note that the bootloader needs 8 extra bytes
+#define NEW_APP_BASE							6
+#define NEW_APP_SECTORS							6
+#define APP_MAX_SIZE							(1024 * 128 * 6 - 8) // Note that the bootloader needs 8 extra bytes
 
-#define QMLUI_BASE								4
-#define LISP_BASE								5
-#define LISP_CONST_BASE							6
+#define QMLUI_BASE								6
+#define LISP_BASE								7
+#define LISP_CONST_BASE							8
 
 
-#define PACKAGE_BASE							7
+#define PACKAGE_BASE							9
 
 #define QMLUI_MAX_SIZE							(1024 * 128 - 8)
 #define LISP_MAX_SIZE							(1024 * 128 - 8)
