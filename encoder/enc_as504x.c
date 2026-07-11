@@ -64,6 +64,10 @@ static uint8_t AS504x_spi_transfer_err_check(spi_bb_state *sw_spi,
 		uint16_t *in_buf, const uint16_t *out_buf, int length);
 static void AS504x_determinate_if_connected(AS504x_config_t *cfg, bool was_last_valid);
 
+// TODO: not hardware-tested on H7. Uses bit-banged SPI (spi_bb.c) whose
+// timing was recalibrated for this core's 480 MHz clock via the DWT cycle
+// counter, replacing F4-era NOP-count delays - verify actual SPI timing
+// against the encoder IC's datasheet on real hardware.
 bool enc_as504x_init(AS504x_config_t *cfg) {
 	memset(&cfg->state, 0, sizeof(AS504x_state));
 	spi_bb_init(&(cfg->sw_spi));

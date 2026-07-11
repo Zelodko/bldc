@@ -238,16 +238,46 @@ void spi_bb_end(spi_bb_state *s) {
 	spi_bb_delay();
 }
 
-void spi_bb_delay(void) {
-	// ~1500 ns long
-	for (volatile int i = 0; i < 6; i++) {
-		__NOP();
+// These delays were originally fixed NOP counts, calibrated by measurement
+// on the F4 hardware this code was ported from (SYSCLK ~168-180 MHz). This
+// board runs the Cortex-M7 core at 480 MHz (STM32_SYS_D1CPRE_CK) - roughly
+// 2.7-2.9x faster - so a fixed NOP count would now produce a proportionally
+// shorter delay and likely violate the connected encoder IC's SPI timing.
+// Using the DWT cycle counter instead ties the delay to the actual core
+// clock so it stays correct regardless of SYSCLK.
+//
+// TODO: not hardware-tested. The 1500 ns / 200 ns targets below are carried
+// over from the original F4 code's approximate NOP-loop timing (only the
+// first was actually documented in a comment; the "short" delay's original
+// duration was never stated and is estimated here). Verify against the
+// encoder IC's datasheet timing with a scope on real hardware before
+// trusting this - affects enc_as504x.c, enc_mt6816.c, enc_tle5012.c and
+// enc_ad2s1205.c, all of which use this bit-banged SPI.
+static void spi_bb_dwt_init(void) {
+	static bool dwt_initialized = false;
+	if (!dwt_initialized) {
+		CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+		DWT->CYCCNT = 0;
+		DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+		dwt_initialized = true;
 	}
 }
 
+static void spi_bb_delay_ns(uint32_t ns) {
+	spi_bb_dwt_init();
+	uint32_t cycles = (uint32_t)(((uint64_t)STM32_SYS_D1CPRE_CK * ns) / 1000000000ULL);
+	uint32_t start = DWT->CYCCNT;
+	while ((DWT->CYCCNT - start) < cycles) {
+		;
+	}
+}
+
+void spi_bb_delay(void) {
+	spi_bb_delay_ns(1500);
+}
+
 void spi_bb_delay_short(void) {
-	__NOP(); __NOP();
-	__NOP(); __NOP();
+	spi_bb_delay_ns(200);
 }
 
 bool spi_bb_check_parity(uint16_t x) {

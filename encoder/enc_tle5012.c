@@ -82,9 +82,13 @@ uint8_t crc8(uint8_t *data, uint8_t length);
 tle5012_errortypes checkSafety(uint16_t command, uint16_t safetyword, const uint16_t *readreg, uint16_t length);
 
 
+// TODO: not hardware-tested on H7. Uses bit-banged SPI/SSC (spi_bb.c)
+// whose timing was recalibrated for this core's 480 MHz clock via the
+// DWT cycle counter, replacing F4-era NOP-count delays - verify actual
+// SSC timing against the encoder IC's datasheet on real hardware.
 bool enc_tle5012_init_sw_ssc(TLE5012_config_t *cfg) {
 	// software ssc
-	memset(&cfg->state, 0, sizeof(TLE5012_state)); 
+	memset(&cfg->state, 0, sizeof(TLE5012_state));
 
 	spi_bb_init(&(cfg->sw_spi));
 

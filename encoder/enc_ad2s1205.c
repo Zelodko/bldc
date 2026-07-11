@@ -32,6 +32,11 @@
 #include <string.h>
 #include <math.h>
 
+// TODO: not hardware-tested on H7. Uses bit-banged SPI (spi_bb.c) whose
+// timing was recalibrated for this core's 480 MHz clock via the DWT cycle
+// counter, replacing F4-era NOP-count delays - verify actual SPI timing
+// against the AD2S1205 resolver-to-digital converter's datasheet on real
+// hardware.
 bool enc_ad2s1205_init(AD2S1205_config_t *cfg) {
 	spi_bb_init(&(cfg->sw_spi));
 

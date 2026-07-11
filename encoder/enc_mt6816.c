@@ -34,6 +34,10 @@
 
 #define MT6816_NO_MAGNET_ERROR_MASK		0x0002
 
+// TODO: not hardware-tested on H7. Uses bit-banged SPI (spi_bb.c) whose
+// timing was recalibrated for this core's 480 MHz clock via the DWT cycle
+// counter, replacing F4-era NOP-count delays - verify actual SPI timing
+// against the encoder IC's datasheet on real hardware.
 bool enc_mt6816_init(MT6816_config_t *cfg) {
 	if (cfg->spi_dev == NULL) {
 		return false;

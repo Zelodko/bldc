@@ -114,11 +114,18 @@ static uint8_t enc_as5x47u_crc8(const uint8_t *data, size_t len, const uint8_t i
 	return cksum;
 }
 
+// TODO: not hardware-tested. rx_buf/tx_buf are DMA'd into by the SPI
+// driver, so on this D-cache-enabled H7 core the CPU could otherwise read
+// stale cached bytes (e.g. the memset'd zeros from before the transfer)
+// instead of what the DMA actually wrote. Confirm on real AS5x47U hardware
+// that this actually clears up bad/stale readings rather than masking a
+// different problem.
 void enc_as5x47u_spi_callback(SPIDriver *pspi) {
 	if (pspi != NULL && pspi->app_arg != NULL) {
 		AS5x47U_config_t *cfg = (AS5x47U_config_t*)pspi->app_arg;
 		spiUnselectI(cfg->spi_dev);
-	
+		SCB_InvalidateDCache_by_Addr((uint32_t*)cfg->state.rx_buf, sizeof(cfg->state.rx_buf));
+
 		// Determine time step for error rate calculation
 		float timestep = timer_seconds_elapsed_since(cfg->state.last_update_time);
 		if (timestep > 1.0) {

@@ -106,10 +106,16 @@ void enc_bissc_routine(BISSC_config_t *cfg) {
 	}
 }
 
+// TODO: not hardware-tested. decod_buf is DMA'd into by the SPI driver, so
+// on this D-cache-enabled H7 core the CPU could otherwise read stale
+// cached bytes instead of what the DMA actually wrote. Confirm on real
+// BiSS-C hardware that this actually clears up bad/stale readings rather
+// than masking a different problem.
 void compute_bissc_callback(SPIDriver *pspi) {
 	if (pspi != NULL && pspi->app_arg != NULL) {
 		BISSC_config_t *cfg = (BISSC_config_t*)pspi->app_arg;
 		spiUnselectI(cfg->spi_dev);
+		SCB_InvalidateDCache_by_Addr((uint32_t*)cfg->state.decod_buf, sizeof(cfg->state.decod_buf));
 
 		float timestep = timer_seconds_elapsed_since(cfg->state.last_update_time);
 		if (timestep > 1.0) {
