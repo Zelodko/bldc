@@ -731,8 +731,6 @@ static uint16_t EE_PageTransfer(uint16_t VirtAddress, uint16_t Data)
 	uint16_t OldPageId=0;
 	uint16_t ValidPage = PAGE0, VarIdx = 0;
 	uint16_t EepromStatus = 0, ReadStatus = 0;
-	FLASH_EraseInitTypeDef pEraseInit;
-	uint32_t valid[8] = {0x0000};
 	uint32_t receive[8] = {0xEEEE};
 	/* Get active Page for read operation */
 	ValidPage = EE_FindValidPage(READ_FROM_VALID_PAGE);

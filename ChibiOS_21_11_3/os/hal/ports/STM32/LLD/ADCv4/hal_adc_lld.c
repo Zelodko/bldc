@@ -293,6 +293,7 @@ static void adc_lld_serve_bdma_interrupt(ADCDriver *adcp, uint32_t flags) {
  * @param[in] adcp      pointer to the @p ADCDriver object
  * @param[in] isr       content of the ISR register
  */
+__attribute__((unused))
 static void adc_lld_serve_interrupt(ADCDriver *adcp, uint32_t isr) {
 
   /* It could be a spurious interrupt caused by overflows after DMA disabling,
@@ -643,6 +644,7 @@ void adc_lld_stop(ADCDriver *adcp) {
  */
 void adc_lld_start_conversion(ADCDriver *adcp) {
   uint32_t dmamode, cfgr = 0U;
+  (void)dmamode;
   const ADCConversionGroup *grpp = adcp->grpp;
 
 #if STM32_ADC_USE_ADC12 == TRUE

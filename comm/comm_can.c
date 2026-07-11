@@ -212,9 +212,8 @@ void comm_can_init(void) {
 	canStart(&CAND2, &cancfg);
 #else
 	// CAND1 must be running for CAND2 to work
-	CANDriver *cand = &HW_CAN_DEV;
 	/*
-	if (cand == &CAND2) {
+	if (&HW_CAN_DEV == &CAND2) {
 		canStart(&CAND1, &cancfg);
 	}
 	*/

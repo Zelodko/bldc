@@ -4885,7 +4885,8 @@ static ICUConfig icucfg = {
 		icuperiodcb,
 		NULL,
 		HW_ICU_CHANNEL,
-		0
+		0,          // dier
+		0xFFFFFFFFU // arr
 };
 
 static lbm_value ext_icu_start(lbm_value *args, lbm_uint argn) {

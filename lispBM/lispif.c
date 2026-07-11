@@ -790,6 +790,17 @@ static void sleep_callback(uint32_t us) {
 	chThdSleepMicroseconds(us);
 }
 
+// The STM32H7 flash controller computes ECC over each 32-byte-aligned
+// "flash word" at program time. A flash word may only be programmed once
+// after being erased - programming it again (even at a different byte
+// offset within the same 32 bytes) corrupts its ECC state and can leave
+// that line permanently unreadable until the containing sector is erased.
+// const_heap_write() is called once per 4-byte lbm_uint, so before
+// programming we check whether any other word sharing this ix's flash
+// line has already been committed, and refuse rather than risk corrupting
+// it if so.
+#define CONST_HEAP_LINE_WORDS	8 // 32 byte ECC line / sizeof(lbm_uint)
+
 static bool const_heap_write(lbm_uint ix, lbm_uint w) {
 	if (ix > const_heap_max_ind) {
 		const_heap_max_ind = ix;
@@ -804,11 +815,33 @@ static bool const_heap_write(lbm_uint ix, lbm_uint w) {
 		return false;
 	}
 
-	HAL_FLASH_Unlock();
-	HAL_FLASH_Program((uint32_t)(const_heap_ptr + ix), (uint8_t *)&w, 4);
+	lbm_uint line_base = ix & ~(lbm_uint)(CONST_HEAP_LINE_WORDS - 1);
+	for (unsigned int i = 0; i < CONST_HEAP_LINE_WORDS; i++) {
+		lbm_uint check_ix = line_base + i;
+		if (check_ix != ix && const_heap_ptr[check_ix] != 0xffffffff) {
+			commands_printf_lisp(
+					"Const heap write at %d shares a flash ECC line with an already-written word, refusing",
+					(int)ix);
+			return false;
+		}
+	}
 
-	//efl_lld_program(&EFLD1, (uint32_t)(const_heap_ptr + ix) - (uint32_t)0x08000000, 4, (uint8_t *)&w);
+	HAL_FLASH_Unlock();
+
+	__disable_irq();
+	SCB_CleanInvalidateDCache();
+	SCB_DisableDCache();
+	SCB_DisableICache();
+	flash_error_t res = HAL_FLASH_Program((uint32_t)(const_heap_ptr + ix), (uint8_t *)&w, 4);
+	SCB_EnableICache();
+	SCB_EnableDCache();
+	__enable_irq();
+
 	HAL_FLASH_Lock();
+
+	if (res != FLASH_NO_ERROR) {
+		return false;
+	}
 
 	if (const_heap_ptr[ix] != w) {
 		return false;

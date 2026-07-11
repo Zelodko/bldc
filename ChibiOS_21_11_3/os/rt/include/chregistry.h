@@ -125,7 +125,9 @@ typedef struct {
 extern "C" {
 #endif
   extern ROMCONST chdebug_t ch_debug;
+#if (CH_CFG_USE_DYNAMIC == TRUE) || defined(__DOXYGEN__)
   ucnt_t chRegGarbageCollect(void *object);
+#endif
   thread_t *chRegFirstThread(void);
   thread_t *chRegNextThread(thread_t *tp);
   thread_t *chRegFindThreadByName(const char *name);

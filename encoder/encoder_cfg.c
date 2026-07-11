@@ -119,6 +119,7 @@ ABI_config_t encoder_cfg_ABI = {
 		HW_ENC_TIM_AF,
 		HW_ENC_EXTI_PORTSRC,
 		HW_ENC_EXTI_PINSRC,
+		0, // exti_ch
 		{0, 0}, // State
 };
 

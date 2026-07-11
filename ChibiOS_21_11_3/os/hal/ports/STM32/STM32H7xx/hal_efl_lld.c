@@ -451,6 +451,7 @@ void efl_lld_init(void) {
  * @notapi
  */
 void efl_lld_start(EFlashDriver *eflp) {
+  (void)eflp;
   //stm32_flash_unlock(eflp);
   FLASH->CR1 = 0x00000000U;
 }
@@ -463,7 +464,7 @@ void efl_lld_start(EFlashDriver *eflp) {
  * @notapi
  */
 void efl_lld_stop(EFlashDriver *eflp) {
-
+  (void)eflp;
   //stm32_flash_lock(eflp);
 }
 
@@ -655,6 +656,7 @@ flash_error_t efl_lld_program(void *instance, flash_offset_t offset,
  * @notapi
  */
 flash_error_t efl_lld_start_erase_all(void *instance) {
+  (void)instance;
   /* Mass erase not allowed. */
   return FLASH_ERROR_UNIMPLEMENTED;
 }

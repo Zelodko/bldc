@@ -160,6 +160,7 @@ ROMCONST chdebug_t ch_debug = {
  *
  * @api
  */
+#if (CH_CFG_USE_DYNAMIC == TRUE) || defined(__DOXYGEN__)
 ucnt_t chRegGarbageCollect(void *object) {
   thread_t *tp;
   ucnt_t n = (ucnt_t)0;
@@ -183,6 +184,7 @@ ucnt_t chRegGarbageCollect(void *object) {
 
   return n;
 }
+#endif
 
 /**
  * @brief   Returns the first thread in the system.

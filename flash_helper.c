@@ -255,7 +255,7 @@ uint8_t* flash_helper_get_sector_address(uint32_t fsector) {
   * @retval FAULT_CODE_NONE or FAULT_CODE_FLASH_CORRUPTION
   */
 uint32_t flash_helper_verify_flash_memory(void) {
-	volatile uint32_t crc, crc2, crc3;
+	volatile uint32_t crc;
 	// Look for a flag indicating that the CRC was previously computed.
 	// If it is blank (0xFFFFFFFF), calculate and store the CRC.
 	volatile uint32_t flag = APP_CRC_WAS_CALCULATED_FLAG_ADDRESS[0];
@@ -310,19 +310,6 @@ uint32_t flash_helper_verify_flash_memory(void) {
 		crc = crc32(APP_START_ADDRESS, (APP_SIZE - 4) / 4); // divide by 4 as the CRC takes 32bit words
 
 		rccDisableCRC();
-		rccEnableCRC(TRUE);
-		crc32_reset();
-
-		// compute vector table (sector 0)
-		//crc32(VECTOR_TABLE_ADDRESS, (VECTOR_TABLE_SIZE) / 4); // divide by 4 as the CRC takes 32bit words
-
-		// skip emulated EEPROM (sector 1 and 2)
-
-		// compute application code
-		crc2 = crc32(APP_START_ADDRESS, (APP_SIZE - 4) / 4); // divide by 4 as the CRC takes 32bit words
-
-		rccDisableCRC();
-
 
 		//Store CRC
 		address = (uint32_t)APP_CRC_ADDRESS;
@@ -341,21 +328,6 @@ uint32_t flash_helper_verify_flash_memory(void) {
 			return FAULT_CODE_FLASH_CORRUPTION;
 		}
 		HAL_FLASH_Lock();
-
-
-		rccEnableCRC(TRUE);
-		crc32_reset();
-
-		// compute vector table (sector 0)
-		//crc32(VECTOR_TABLE_ADDRESS, (VECTOR_TABLE_SIZE) / 4);
-
-		// skip emulated EEPROM (sector 1 and 2)
-
-		// compute application code
-		crc3 = crc32(APP_START_ADDRESS, (APP_SIZE) / 4);
-
-		rccDisableCRC();
-
 
 		// reboot
 		NVIC_SystemReset();
