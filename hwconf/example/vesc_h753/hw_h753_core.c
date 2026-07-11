@@ -225,28 +225,6 @@ static void terminal_cmd_doublepulse(int argc, const char** argv)
 
 }
 
-static void terminal_cmd_i2c_ping_imu(int argc, const char **argv) {
-    (void)argc;
-    (void)argv;
-
-    uint8_t tx_buf[1];
-    tx_buf[0] = 0x0F;
-    uint8_t rx_buf[1];
-    hw_start_i2c();
-
-	bool res = hw_i2c_tx_rx(0x6B, tx_buf, 1, rx_buf, 1);
-
-    if (res) {
-		commands_printf("I2C TX OK: (rx: %d)", rx_buf[0]);
-    } else {
-        i2cflags_t err = i2cGetErrors(&HW_I2C_DEV);
-        commands_printf(
-            "I2C TX FAIL: addr=0x6B reg=0x0F err=0x%02X",
-            (unsigned)err
-        );
-    }
-}
-
 void hw_init_gpio(void) {
 
 
@@ -274,20 +252,10 @@ void hw_init_gpio(void) {
 	palSetPadMode(HW_SHUTDOWN_SENSE_GPIO, HW_SHUTDOWN_SENSE_PIN, PAL_MODE_INPUT);
 	HW_SHUTDOWN_HOLD_ON();
 
-	// Test pin for debugging
-	//SDP/SA0:adress
-	palSetPadMode(GPIOB, 4,
-				PAL_MODE_OUTPUT_PUSHPULL |
-				PAL_STM32_OSPEED_HIGHEST);
-	//CS: 
-	palSetPadMode(GPIOA, 15,
-				PAL_MODE_OUTPUT_PUSHPULL |
-				PAL_STM32_OSPEED_HIGHEST);
-	//set 0x6A
-	palClearPad(GPIOB, 4);
-	//enable i2c
-	palSetPad(GPIOA, 15);
-
+	// LSM6DS3 INT1 - not used yet, just kept out of a floating state.
+	// NSS/SCK/MISO/MOSI are left alone here: imu_init_lsm6ds3_spi() configures
+	// them for hardware SPI1 when the IMU is actually initialized.
+	palSetPadMode(LSM6DS3_INT1_GPIO, LSM6DS3_INT1_PIN, PAL_MODE_INPUT_PULLDOWN);
 
 //	INIT_BR();
 
@@ -356,13 +324,6 @@ void hw_init_gpio(void) {
 		"Start a double pulse test",
 		0,
 		terminal_cmd_doublepulse);	
-
-	terminal_register_command_callback(
-		"i2c_ping_imu",
-		"Send register 0x0F to I2C device 0x6B",
-		0,
-		terminal_cmd_i2c_ping_imu
-	);
 
 	terminal_register_command_callback(
 		"test_button",
@@ -620,6 +581,19 @@ bool hw_i2c_tx_rx(uint8_t dev_addr,
     return res;
 }
 
+/**
+ * Force the LSM6DS3 to select the I2C protocol on its shared NSS/SCK/MISO/MOSI
+ * pins. Per the datasheet the chip latches its interface from the CS/NSS pin
+ * state: NSS held high through the first access after power-up selects I2C,
+ * while a CS-low SPI transaction latches SPI mode until the next power cycle.
+ * There's no external pull-up on NSS on this board, so this has to be driven
+ * explicitly before the I2C bit-bang fallback in imu_init_lsm6ds3() runs.
+ */
+void hw_lsm6ds3_force_i2c_mode(void) {
+	palSetPadMode(LSM6DS3_NSS_GPIO, LSM6DS3_NSS_PIN,
+			PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST);
+	palSetPad(LSM6DS3_NSS_GPIO, LSM6DS3_NSS_PIN);
+}
 
 static void terminal_button_test(int argc, const char **argv) {
 	(void)argc;

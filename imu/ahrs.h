@@ -26,6 +26,6 @@ void ahrs_update_madgwick_imu(const float *gyroXYZ, const float *accelXYZ, float
 float ahrs_get_roll(const ATTITUDE_INFO *att);
 float ahrs_get_pitch(const ATTITUDE_INFO *att);
 float ahrs_get_yaw(const ATTITUDE_INFO *att);
-void ahrs_get_roll_pitch_yaw(float *rpy, ATTITUDE_INFO *att);
+void ahrs_get_roll_pitch_yaw(float *rpy, const ATTITUDE_INFO *att);
 
 #endif

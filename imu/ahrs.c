@@ -296,7 +296,7 @@ float ahrs_get_yaw(const ATTITUDE_INFO *att) {
 	return -atan2f(q0 * q3 + q1 * q2, 0.5 - (q2 * q2 + q3 * q3));
 }
 
-void ahrs_get_roll_pitch_yaw(float *rpy, ATTITUDE_INFO *att) {
+void ahrs_get_roll_pitch_yaw(float *rpy, const ATTITUDE_INFO *att) {
 	// See http://math.stackexchange.com/questions/687964/getting-euler-tait-bryan-angles-from-quaternion-representation
 	const float q0 = att->q0;
 	const float q1 = att->q1;
