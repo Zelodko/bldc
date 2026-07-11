@@ -58,6 +58,12 @@ void app_set_configuration(app_configuration *conf) {
 		app_changed = appconf.servo_out_enable != conf->servo_out_enable;
 	}
 
+#if CAN_ENABLE
+	if (conf->can_baud_rate != appconf.can_baud_rate) {
+		comm_can_set_baud(conf->can_baud_rate, 0);
+	}
+#endif
+
 	appconf = *conf;
 
 	if (app_changed) {
@@ -75,10 +81,6 @@ void app_set_configuration(app_configuration *conf) {
 	if (!conf_general_permanent_nrf_found) {
 		nrf_driver_stop();
 	}
-
-#if CAN_ENABLE
-	comm_can_set_baud(conf->can_baud_rate, 0);
-#endif
 
 	imu_init(&conf->imu_conf);
 

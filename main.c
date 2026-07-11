@@ -278,8 +278,8 @@ int main(void) {
 	events_init();
 	timer_init(); // Initialize timer here to allow I2C in hw_init
 	hw_init_gpio();
-	//LED_RED_OFF();
-	//LED_GREEN_OFF();
+	LED_RED_OFF();
+	LED_GREEN_OFF();
 	//PIN_TEST_ON();
 	conf_general_init();
 	volatile uint32_t result = flash_helper_verify_flash_memory();

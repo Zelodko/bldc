@@ -627,6 +627,8 @@ void commands_process_packet(unsigned char *data, unsigned int len,
 			}
 #endif
 
+			commands_apply_appconf_hw_limits(appconf);
+
 			if (packet_id == COMM_SET_APPCONF) {
 				conf_general_store_app_configuration(appconf);
 			}
