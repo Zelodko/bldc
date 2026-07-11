@@ -3362,6 +3362,11 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 			}
 
 			switch (conf_now->foc_sensor_mode) {
+			// TODO: FOC_SENSOR_MODE_ENCODER_AB is not implemented as its own mode yet
+			// (falls through to plain encoder handling). Not currently reachable since
+			// no config path sets foc_sensor_mode to it. Give it real AB-quadrature-only
+			// behavior when the motor control core gets its dedicated porting pass.
+			case FOC_SENSOR_MODE_ENCODER_AB:
 			case FOC_SENSOR_MODE_ENCODER:
 				if (encoder_index_found() || virtual_motor_is_connected()) {
 					motor_now->m_motor_state.phase = foc_correct_encoder(
@@ -3562,6 +3567,8 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 		// Set motor phase
 		{
 			switch (conf_now->foc_sensor_mode) {
+			// TODO: see fallthrough note above the other foc_sensor_mode switch in this file.
+			case FOC_SENSOR_MODE_ENCODER_AB:
 			case FOC_SENSOR_MODE_ENCODER:
 				motor_now->m_motor_state.phase = foc_correct_encoder(
 						motor_now->m_phase_now_observer,

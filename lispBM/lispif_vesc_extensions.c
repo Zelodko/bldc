@@ -2391,6 +2391,18 @@ static lbm_value ext_encoder_index_found(lbm_value *args, lbm_uint argn) {
 	return lbm_enc_i(encoder_index_found() ? 1 : 0);
 }
 
+static lbm_value ext_encoder_abi_state(lbm_value *args, lbm_uint argn) {
+	(void)args; (void)argn;
+
+	lbm_value abi_data = ENC_SYM_NIL;
+	abi_data = lbm_cons(lbm_enc_i(encoder_cfg_ABI.state.index_pulse_cnt), abi_data);
+	abi_data = lbm_cons(lbm_enc_i(encoder_cfg_ABI.state.bad_pulses), abi_data);
+	abi_data = lbm_cons(lbm_enc_i(encoder_cfg_ABI.state.cnt_at_ind_last), abi_data);
+	abi_data = lbm_cons(lbm_enc_i(encoder_index_found() ? 1 : 0), abi_data);
+
+	return abi_data;
+}
+
 static lbm_value ext_pos_pid_now(lbm_value *args, lbm_uint argn) {
 	(void)args; (void)argn;
 	return lbm_enc_float(mc_interface_get_pid_pos_now());
@@ -6251,6 +6263,7 @@ void lispif_load_vesc_extensions(void) {
 		lbm_add_extension("set-encoder", ext_set_encoder);
 		lbm_add_extension("get-encoder-error-rate", ext_get_encoder_error_rate);
 		lbm_add_extension("encoder-index-found", ext_encoder_index_found);
+		lbm_add_extension("encoder-abi-state", ext_encoder_abi_state);
 		lbm_add_extension("pos-pid-now", ext_pos_pid_now);
 		lbm_add_extension("pos-pid-set", ext_pos_pid_set);
 		lbm_add_extension("pos-pid-error", ext_pos_pid_error);
