@@ -41,6 +41,7 @@
 #include "timer.h"
 #include "ahrs.h"
 #include "encoder.h"
+#include "shutdown.h"
 #include "conf_general.h"
 #include "servo_dec.h"
 #include "pwm_servo.h"
@@ -55,7 +56,7 @@ void packet_process_byte(uint8_t rx_data, PACKET_STATE_t *state);
 void packet_send_packet(unsigned char *data, unsigned int len, PACKET_STATE_t *state);
 
 typedef struct {
-	char *name;
+	const char *name;
 	void *arg;
 	void (*func)(void*);
 	void *w_mem;
@@ -94,7 +95,7 @@ static THD_FUNCTION(lib_thd, arg) {
 	lbm_free(t);
 }
 
-lib_thread lispif_spawn(void (*func)(void*), size_t stack_size, char *name, void *arg) {
+lib_thread lispif_spawn(void (*func)(void*), size_t stack_size, const char *name, void *arg) {
 	if (!utils_is_func_valid(func)) {
 		commands_printf_lisp("Invalid function address. Make sure that the function is static.");
 		return 0;
@@ -395,7 +396,7 @@ static void wait_uart_tx_task(void *arg) {
 	HW_UART_DEV.usart->CR1 |= USART_CR1_RE;
 }
 
-static bool lib_uart_write(uint8_t *data, uint32_t size) {
+static bool lib_uart_write(const uint8_t *data, uint32_t size) {
 	if (uart_cfg.cr3 & USART_CR3_HDSEL) {
 		HW_UART_DEV.usart->CR1 &= ~USART_CR1_RE;
 		sdWrite(&HW_UART_DEV, data, size);
@@ -696,6 +697,15 @@ static void comm_can_transmit_sid_wrapper(uint32_t id, const uint8_t *data, uint
 
 static void comm_can_transmit_eid_wrapper(uint32_t id, const uint8_t *data, uint8_t len) {
 	comm_can_transmit_eid(id, data, len);
+}
+
+static void lib_thread_set_priority(int priority) {
+	utils_truncate_number_int(&priority, -5, 5);
+	chThdSetPriority((tprio_t)((int)NORMALPRIO + priority));
+}
+
+static void lib_shutdown_disable(bool disable) {
+	SHUTDOWN_SET_SAMPLING_DISABLED(disable);
 }
 
 lbm_value ext_load_native_lib(lbm_value *args, lbm_uint argn) {
@@ -1033,6 +1043,9 @@ lbm_value ext_load_native_lib(lbm_value *args, lbm_uint argn) {
 		cif.cif.sem_signal = lib_sem_signal;
 		cif.cif.sem_wait_to = lib_sem_wait_to;
 		cif.cif.sem_reset = lib_sem_reset;
+
+		cif.cif.thread_set_priority = lib_thread_set_priority;
+		cif.cif.shutdown_disable = lib_shutdown_disable;
 
 		lib_init_done = true;
 	}

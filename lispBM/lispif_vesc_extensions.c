@@ -36,6 +36,7 @@
 #include "servo_dec.h"
 #include "pwm_servo.h"
 #include "encoder/encoder.h"
+#include "encoder/encoder_cfg.h"
 #include "comm_can.h"
 #include "bms.h"
 #include "utils_math.h"
@@ -60,6 +61,9 @@
 #include "app.h"
 #include "comm_usb.h"
 #include "flash_helper.h"
+#include "packet.h"
+#include "timer.h"
+#include "encoder_cfg.h"
 
 #include <math.h>
 #include <ctype.h>
@@ -113,8 +117,27 @@ typedef struct {
 	lbm_uint pin_hall1;
 	lbm_uint pin_hall2;
 	lbm_uint pin_hall3;
+#ifdef HW_HALL_ENC_GPIO4
+	lbm_uint pin_hall4;
+#endif
+#ifdef HW_HALL_ENC_GPIO5
+	lbm_uint pin_hall5;
+#endif
+#ifdef HW_HALL_ENC_GPIO6
+	lbm_uint pin_hall6;
+#endif
+#ifdef HW_ADC_EXT_GPIO
 	lbm_uint pin_adc1;
+#endif
+#ifdef HW_ADC_EXT2_GPIO
 	lbm_uint pin_adc2;
+#endif
+#ifdef HW_ADC_EXT3_GPIO
+	lbm_uint pin_adc3;
+#endif
+#ifdef HW_ADC_EXT4_GPIO
+	lbm_uint pin_adc4;
+#endif
 	lbm_uint pin_ppm;
 #ifdef PIN_HW_1
 	lbm_uint pin_hw_1;
@@ -154,6 +177,9 @@ typedef struct {
 	lbm_uint bms_vmax_limit_end;
 	lbm_uint motor_type;
 	lbm_uint foc_sensor_mode;
+	lbm_uint foc_encoder_offset;
+	lbm_uint foc_encoder_inverted;
+	lbm_uint foc_encoder_ratio;
 	lbm_uint foc_hfi_amb_mode;
 	lbm_uint foc_hfi_amb_current;
 	lbm_uint foc_hfi_amb_tres;
@@ -166,6 +192,8 @@ typedef struct {
 	lbm_uint foc_motor_r;
 	lbm_uint foc_motor_flux_linkage;
 	lbm_uint foc_observer_gain;
+	lbm_uint foc_observer_type;
+	lbm_uint foc_mtpa_mode;
 	lbm_uint foc_hfi_voltage_start;
 	lbm_uint foc_hfi_voltage_run;
 	lbm_uint foc_hfi_voltage_max;
@@ -180,6 +208,7 @@ typedef struct {
 	lbm_uint foc_hall_t6;
 	lbm_uint foc_hall_t7;
 	lbm_uint foc_sl_erpm_hfi;
+	lbm_uint foc_hfi_reset_erpm;
 	lbm_uint foc_openloop_rpm;
 	lbm_uint foc_openloop_rpm_low;
 	lbm_uint foc_sl_openloop_time_lock;
@@ -190,11 +219,22 @@ typedef struct {
 	lbm_uint foc_offsets_cal_mode;
 	lbm_uint foc_fw_current_max;
 	lbm_uint foc_fw_duty_start;
+	lbm_uint foc_fw_ramp_time;
+	lbm_uint foc_fw_q_current_factor;
+	lbm_uint foc_fw_backoff;
 	lbm_uint foc_short_ls_on_zero_duty;
+	lbm_uint foc_overmod_factor;
+	lbm_uint foc_mag_vd_max;
 	lbm_uint m_invert_direction;
 	lbm_uint m_out_aux_mode;
 	lbm_uint m_motor_temp_sens_type;
 	lbm_uint m_ntc_motor_beta;
+	lbm_uint m_ptc_motor_coeff;
+	lbm_uint m_ntcx_ptcx_temp_base;
+	lbm_uint m_ntcx_ptcx_res;
+	lbm_uint m_encoder_counts;
+	lbm_uint m_sensor_port_mode;
+	lbm_uint m_fault_stop_time_ms;
 	lbm_uint si_motor_poles;
 	lbm_uint si_gear_ratio;
 	lbm_uint si_wheel_diameter;
@@ -205,6 +245,7 @@ typedef struct {
 	lbm_uint controller_id;
 	lbm_uint timeout_msec;
 	lbm_uint can_baud_rate;
+	lbm_uint can_mode;
 	lbm_uint can_status_rate_1;
 	lbm_uint can_status_msgs_r1;
 	lbm_uint can_status_rate_2;
@@ -216,6 +257,7 @@ typedef struct {
 	lbm_uint ppm_pulse_center;
 	lbm_uint ppm_ramp_time_pos;
 	lbm_uint ppm_ramp_time_neg;
+	lbm_uint ppm_hyst;
 	lbm_uint adc_ctrl_type;
 	lbm_uint adc_ramp_time_pos;
 	lbm_uint adc_ramp_time_neg;
@@ -224,7 +266,28 @@ typedef struct {
 	lbm_uint adc_v1_end;
 	lbm_uint adc_v1_min;
 	lbm_uint adc_v1_max;
+	lbm_uint adc_v1_center;
+	lbm_uint adc_v2_start;
+	lbm_uint adc_v2_end;
+	lbm_uint adc_tc;
+	lbm_uint adc_tc_max_diff;
 	lbm_uint pas_current_scaling;
+	lbm_uint vr_ctrl_type;
+	lbm_uint vr_hyst;
+	lbm_uint vr_ramp_time_pos;
+	lbm_uint vr_ramp_time_neg;
+	lbm_uint vr_cc_erpm_per_s;
+	lbm_uint vr_throttle_exp;
+	lbm_uint vr_throttle_exp_brake;
+	lbm_uint vr_throttle_exp_mode;
+	lbm_uint vr_multi_esc;
+	lbm_uint vr_tc;
+	lbm_uint vr_tc_max_diff;
+	lbm_uint vr_use_smart_rev;
+	lbm_uint vr_smart_rev_max_duty;
+	lbm_uint vr_smart_rev_ramp_time;
+	lbm_uint vr_coast_brake_level;
+	lbm_uint vr_coast_brake_ramp_time;
 
 	// Sysinfo
 	lbm_uint hw_name;
@@ -361,11 +424,43 @@ static bool compare_symbol(lbm_uint sym, lbm_uint *comp) {
 			lbm_add_symbol_const("pin-hall2", comp);
 		} else if (comp == &syms_vesc.pin_hall3) {
 			lbm_add_symbol_const("pin-hall3", comp);
-		} else if (comp == &syms_vesc.pin_adc1) {
+		}
+#ifdef HW_HALL_ENC_GPIO4
+		else if (comp == &syms_vesc.pin_hall4) {
+			lbm_add_symbol_const("pin-hall4", comp);
+		}
+#endif
+#ifdef HW_HALL_ENC_GPIO5
+		else if (comp == &syms_vesc.pin_hall5) {
+			lbm_add_symbol_const("pin-hall5", comp);
+		}
+#endif
+#ifdef HW_HALL_ENC_GPIO6
+		else if (comp == &syms_vesc.pin_hall6) {
+			lbm_add_symbol_const("pin-hall6", comp);
+		}
+#endif
+#ifdef HW_ADC_EXT_GPIO
+		else if (comp == &syms_vesc.pin_adc1) {
 			lbm_add_symbol_const("pin-adc1", comp);
-		} else if (comp == &syms_vesc.pin_adc2) {
+		}
+#endif
+#ifdef HW_ADC_EXT2_GPIO
+		else if (comp == &syms_vesc.pin_adc2) {
 			lbm_add_symbol_const("pin-adc2", comp);
-		} else if (comp == &syms_vesc.pin_ppm) {
+		}
+#endif
+#ifdef HW_ADC_EXT3_GPIO
+		else if (comp == &syms_vesc.pin_adc3) {
+			lbm_add_symbol_const("pin-adc3", comp);
+		}
+#endif
+#ifdef HW_ADC_EXT4_GPIO
+		else if (comp == &syms_vesc.pin_adc4) {
+			lbm_add_symbol_const("pin-adc4", comp);
+		}
+#endif
+		else if (comp == &syms_vesc.pin_ppm) {
 			lbm_add_symbol_const("pin-ppm", comp);
 		} 
 #ifdef PIN_HW_1
@@ -439,6 +534,12 @@ static bool compare_symbol(lbm_uint sym, lbm_uint *comp) {
 			lbm_add_symbol_const("motor-type", comp);
 		} else if (comp == &syms_vesc.foc_sensor_mode) {
 			lbm_add_symbol_const("foc-sensor-mode", comp);
+		} else if (comp == &syms_vesc.foc_encoder_offset) {
+			lbm_add_symbol_const("foc-encoder-offset", comp);
+		} else if (comp == &syms_vesc.foc_encoder_inverted) {
+			lbm_add_symbol_const("foc-encoder-inverted", comp);
+		} else if (comp == &syms_vesc.foc_encoder_ratio) {
+			lbm_add_symbol_const("foc-encoder-ratio", comp);
 		} else if (comp == &syms_vesc.foc_hfi_amb_mode) {
 			lbm_add_symbol_const("foc-hfi-amb-mode", comp);
 		} else if (comp == &syms_vesc.foc_hfi_amb_current) {
@@ -463,6 +564,10 @@ static bool compare_symbol(lbm_uint sym, lbm_uint *comp) {
 			lbm_add_symbol_const("foc-motor-flux-linkage", comp);
 		} else if (comp == &syms_vesc.foc_observer_gain) {
 			lbm_add_symbol_const("foc-observer-gain", comp);
+		} else if (comp == &syms_vesc.foc_observer_type) {
+			lbm_add_symbol_const("foc-observer-type", comp);
+		} else if (comp == &syms_vesc.foc_mtpa_mode) {
+			lbm_add_symbol_const("foc-mtpa-mode", comp);
 		} else if (comp == &syms_vesc.foc_hfi_voltage_start) {
 			lbm_add_symbol_const("foc-hfi-voltage-start", comp);
 		} else if (comp == &syms_vesc.foc_hfi_voltage_run) {
@@ -491,6 +596,8 @@ static bool compare_symbol(lbm_uint sym, lbm_uint *comp) {
 			lbm_add_symbol_const("foc-hall-t7", comp);
 		} else if (comp == &syms_vesc.foc_sl_erpm_hfi) {
 			lbm_add_symbol_const("foc-sl-erpm-hfi", comp);
+		} else if (comp == &syms_vesc.foc_hfi_reset_erpm) {
+			lbm_add_symbol_const("foc-hfi-reset-erpm", comp);
 		} else if (comp == &syms_vesc.foc_openloop_rpm) {
 			lbm_add_symbol_const("foc-openloop-rpm", comp);
 		} else if (comp == &syms_vesc.foc_openloop_rpm_low) {
@@ -511,8 +618,18 @@ static bool compare_symbol(lbm_uint sym, lbm_uint *comp) {
 			lbm_add_symbol_const("foc-fw-current-max", comp);
 		} else if (comp == &syms_vesc.foc_fw_duty_start) {
 			lbm_add_symbol_const("foc-fw-duty-start", comp);
+		} else if (comp == &syms_vesc.foc_fw_ramp_time) {
+			lbm_add_symbol_const("foc-fw-ramp-time", comp);
+		} else if (comp == &syms_vesc.foc_fw_q_current_factor) {
+			lbm_add_symbol_const("foc-fw-q-current-factor", comp);
+		} else if (comp == &syms_vesc.foc_fw_backoff) {
+			lbm_add_symbol_const("foc-fw-backoff", comp);
 		} else if (comp == &syms_vesc.foc_short_ls_on_zero_duty) {
 			lbm_add_symbol_const("foc-short-ls-on-zero-duty", comp);
+		} else if (comp == &syms_vesc.foc_overmod_factor) {
+			lbm_add_symbol_const("foc-overmod-factor", comp);
+		} else if (comp == &syms_vesc.foc_mag_vd_max) {
+			lbm_add_symbol_const("foc-mag-vd-max", comp);
 		} else if (comp == &syms_vesc.m_invert_direction) {
 			lbm_add_symbol_const("m-invert-direction", comp);
 		} else if (comp == &syms_vesc.m_out_aux_mode) {
@@ -521,6 +638,18 @@ static bool compare_symbol(lbm_uint sym, lbm_uint *comp) {
 			lbm_add_symbol_const("m-motor-temp-sens-type", comp);
 		} else if (comp == &syms_vesc.m_ntc_motor_beta) {
 			lbm_add_symbol_const("m-ntc-motor-beta", comp);
+		} else if (comp == &syms_vesc.m_ptc_motor_coeff) {
+			lbm_add_symbol_const("m-ptc-motor-coeff", comp);
+		} else if (comp == &syms_vesc.m_ntcx_ptcx_temp_base) {
+			lbm_add_symbol_const("m-ntcx-ptcx-temp-base", comp);
+		} else if (comp == &syms_vesc.m_ntcx_ptcx_res) {
+			lbm_add_symbol_const("m-ntcx-ptcx-res", comp);
+		} else if (comp == &syms_vesc.m_encoder_counts) {
+			lbm_add_symbol_const("m-encoder-counts", comp);
+		} else if (comp == &syms_vesc.m_sensor_port_mode) {
+			lbm_add_symbol_const("m-sensor-port-mode", comp);
+		} else if (comp == &syms_vesc.m_fault_stop_time_ms) {
+			lbm_add_symbol_const("m-fault-stop-time-ms", comp);
 		} else if (comp == &syms_vesc.si_motor_poles) {
 			lbm_add_symbol_const("si-motor-poles", comp);
 		} else if (comp == &syms_vesc.si_gear_ratio) {
@@ -541,6 +670,8 @@ static bool compare_symbol(lbm_uint sym, lbm_uint *comp) {
 			lbm_add_symbol_const("timeout-msec", comp);
 		} else if (comp == &syms_vesc.can_baud_rate) {
 			lbm_add_symbol_const("can-baud-rate", comp);
+		} else if (comp == &syms_vesc.can_mode) {
+			lbm_add_symbol_const("can-mode", comp);
 		} else if (comp == &syms_vesc.can_status_rate_1) {
 			lbm_add_symbol_const("can-status-rate-1", comp);
 		} else if (comp == &syms_vesc.can_status_msgs_r1) {
@@ -563,6 +694,8 @@ static bool compare_symbol(lbm_uint sym, lbm_uint *comp) {
 			lbm_add_symbol_const("ppm-ramp-time-pos", comp);
 		} else if (comp == &syms_vesc.ppm_ramp_time_neg) {
 			lbm_add_symbol_const("ppm-ramp-time-neg", comp);
+		} else if (comp == &syms_vesc.ppm_hyst) {
+			lbm_add_symbol_const("ppm-hyst", comp);
 		} else if (comp == &syms_vesc.adc_ctrl_type) {
 			lbm_add_symbol_const("adc-ctrl-type", comp);
 		} else if (comp == &syms_vesc.adc_ramp_time_pos) {
@@ -579,8 +712,50 @@ static bool compare_symbol(lbm_uint sym, lbm_uint *comp) {
 			lbm_add_symbol_const("adc-v1-min", comp);
 		} else if (comp == &syms_vesc.adc_v1_max) {
 			lbm_add_symbol_const("adc-v1-max", comp);
+		} else if (comp == &syms_vesc.adc_v1_center) {
+			lbm_add_symbol_const("adc-v1-center", comp);
+		} else if (comp == &syms_vesc.adc_v2_start) {
+			lbm_add_symbol_const("adc-v2-start", comp);
+		} else if (comp == &syms_vesc.adc_v2_end) {
+			lbm_add_symbol_const("adc-v2-end", comp);
+		} else if (comp == &syms_vesc.adc_tc) {
+			lbm_add_symbol_const("adc-tc", comp);
+		} else if (comp == &syms_vesc.adc_tc_max_diff) {
+			lbm_add_symbol_const("adc-tc-max-diff", comp);
 		} else if (comp == &syms_vesc.pas_current_scaling) {
 			lbm_add_symbol_const("pas-current-scaling", comp);
+		} else if (comp == &syms_vesc.vr_ctrl_type) {
+			lbm_add_symbol_const("vr-ctrl-type", comp);
+		} else if (comp == &syms_vesc.vr_hyst) {
+			lbm_add_symbol_const("vr-hyst", comp);
+		} else if (comp == &syms_vesc.vr_ramp_time_pos) {
+			lbm_add_symbol_const("vr-ramp-time-pos", comp);
+		} else if (comp == &syms_vesc.vr_ramp_time_neg) {
+			lbm_add_symbol_const("vr-ramp-time-neg", comp);
+		} else if (comp == &syms_vesc.vr_cc_erpm_per_s) {
+			lbm_add_symbol_const("vr-cc-erpm-per-s", comp);
+		} else if (comp == &syms_vesc.vr_throttle_exp) {
+			lbm_add_symbol_const("vr-throttle-exp", comp);
+		} else if (comp == &syms_vesc.vr_throttle_exp_brake) {
+			lbm_add_symbol_const("vr-throttle-exp-brake", comp);
+		} else if (comp == &syms_vesc.vr_throttle_exp_mode) {
+			lbm_add_symbol_const("vr-throttle-exp-mode", comp);
+		} else if (comp == &syms_vesc.vr_multi_esc) {
+			lbm_add_symbol_const("vr-multi-esc", comp);
+		} else if (comp == &syms_vesc.vr_tc) {
+			lbm_add_symbol_const("vr-tc", comp);
+		} else if (comp == &syms_vesc.vr_tc_max_diff) {
+			lbm_add_symbol_const("vr-tc-max-diff", comp);
+		} else if (comp == &syms_vesc.vr_use_smart_rev) {
+			lbm_add_symbol_const("vr-use-smart-rev", comp);
+		} else if (comp == &syms_vesc.vr_smart_rev_max_duty) {
+			lbm_add_symbol_const("vr-smart-rev-max-duty", comp);
+		} else if (comp == &syms_vesc.vr_smart_rev_ramp_time) {
+			lbm_add_symbol_const("vr-smart-rev-ramp-time", comp);
+		} else if (comp == &syms_vesc.vr_coast_brake_level) {
+			lbm_add_symbol_const("vr-coast-brake-level", comp);
+		} else if (comp == &syms_vesc.vr_coast_brake_ramp_time) {
+			lbm_add_symbol_const("vr-coast-brake-ramp-time", comp);
 		}
 
 		else if (comp == &syms_vesc.hw_name) {
@@ -655,6 +830,27 @@ static bool compare_symbol(lbm_uint sym, lbm_uint *comp) {
 
 static bool is_symbol_true_false(lbm_value v) {
 	return lbm_is_symbol_true(v) || lbm_is_symbol_nil(v);;
+}
+
+static bool start_flatten_with_gc(lbm_flat_value_t *v, size_t buffer_size) {
+	if (lispif_is_eval_task()) {
+		return lbm_start_flatten(v, buffer_size);
+	}
+
+	if (lbm_start_flatten(v, buffer_size)) {
+		return true;
+	}
+
+	int timeout = 3;
+	uint32_t gc_last = lbm_heap_state.gc_num;
+	lbm_request_gc();
+
+	while (lbm_heap_state.gc_num <= gc_last && timeout > 0) {
+		chThdSleepMilliseconds(1);
+		timeout--;
+	}
+
+	return lbm_start_flatten(v, buffer_size);
 }
 
 // Various commands
@@ -991,26 +1187,19 @@ static lbm_value ext_get_adc(lbm_value *args, lbm_uint argn) {
 		return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT));
 	} else if (argn == 1) {
 		lbm_int channel = lbm_dec_as_i32(args[0]);
-		if (channel == 0) {
-			return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT));
-		} else if (channel == 1) {
-			return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT2));
-		} else if (channel == 2) {
-			return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT3));
-		} else if (channel == 3) {
-			return lbm_enc_float(ADC_VOLTS(ADC_IND_TEMP_MOTOR));
-		} else if (channel == 4) {
-			return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT4));
-		} else if (channel == 5) {
-			return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT5));
-		} else if (channel == 6) {
-			return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT6));
-		} else if (channel == 7) {
-			return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT7));
-		} else if (channel == 8) {
-			return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT8));
-		} else {
-			return ENC_SYM_EERROR;
+		switch (channel) {
+		case 0: return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT));
+		case 1: return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT2));
+		case 2: return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT3));
+		case 3: return lbm_enc_float(ADC_VOLTS(ADC_IND_TEMP_MOTOR));
+		case 4: return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT4));
+		case 5: return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT5));
+		case 6: return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT6));
+		case 7: return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT7));
+		case 8: return lbm_enc_float(ADC_VOLTS(ADC_IND_EXT8));
+		case 20: return lbm_enc_float(ENCODER_SIN_VOLTS);
+		case 21: return lbm_enc_float(ENCODER_COS_VOLTS);
+		default: return ENC_SYM_EERROR;
 		}
 	} else {
 		return ENC_SYM_EERROR;
@@ -1307,9 +1496,6 @@ static lbm_value ext_recv_data(lbm_value *args, lbm_uint argn) {
 
 static lbm_value ext_get_remote_state(lbm_value *args, lbm_uint argn) {
 	(void)args; (void)argn;
-
-	float gyro[3];
-	imu_get_gyro_derotated(gyro);
 
 	lbm_value state = ENC_SYM_NIL;
 	state = lbm_cons(lbm_enc_float(app_nunchuk_get_update_age()), state);
@@ -1791,6 +1977,25 @@ static lbm_value ext_foc_openloop(lbm_value *args, lbm_uint argn) {
 	return ENC_SYM_TRUE;
 }
 
+static lbm_value ext_foc_openloop_phase(lbm_value *args, lbm_uint argn) {
+	LBM_CHECK_ARGN_NUMBER(2);
+	timeout_reset();
+	mc_interface_set_openloop_phase(lbm_dec_as_float(args[0]), lbm_dec_as_float(args[1]));
+	return ENC_SYM_TRUE;
+}
+
+//static lbm_value ext_foc_set_fw_override(lbm_value *args, lbm_uint argn) {
+//	LBM_CHECK_ARGN_NUMBER(1);
+//	mcpwm_foc_set_fw_override(lbm_dec_as_float(args[0]));
+//	return ENC_SYM_TRUE;
+//}
+
+static lbm_value ext_set_kill_sw(lbm_value *args, lbm_uint argn) {
+	LBM_CHECK_ARGN_NUMBER(1);
+	timeout_set_kill_sw_ext(lbm_dec_as_i32(args[0]) > 0);
+	return ENC_SYM_TRUE;
+}
+
 static lbm_value ext_foc_beep(lbm_value *args, lbm_uint argn) {
 	LBM_CHECK_ARGN_NUMBER(3);
 	timeout_reset();
@@ -2066,6 +2271,12 @@ static lbm_value ext_get_temp_mot(lbm_value *args, lbm_uint argn) {
 	return lbm_enc_float(mc_interface_temp_motor_filtered());
 }
 
+static lbm_value ext_get_temp_mot_res(lbm_value *args, lbm_uint argn) {
+	(void)args; (void)argn;
+	return lbm_enc_float(NTC_RES_MOTOR(ADC_Value[mc_interface_motor_now() ?
+			ADC_IND_TEMP_MOTOR : ADC_IND_TEMP_MOTOR_2]));
+}
+
 static lbm_value ext_get_speed(lbm_value *args, lbm_uint argn) {
 	(void)args; (void)argn;
 	return lbm_enc_float(mc_interface_get_speed());
@@ -2173,6 +2384,11 @@ static lbm_value ext_set_encoder(lbm_value *args, lbm_uint argn) {
 static lbm_value ext_get_encoder_error_rate(lbm_value *args, lbm_uint argn) {
 	(void)args; (void)argn;
 	return lbm_enc_float(encoder_get_error_rate());
+}
+
+static lbm_value ext_encoder_index_found(lbm_value *args, lbm_uint argn) {
+	(void)args; (void)argn;
+	return lbm_enc_i(encoder_index_found() ? 1 : 0);
 }
 
 static lbm_value ext_pos_pid_now(lbm_value *args, lbm_uint argn) {
@@ -2746,12 +2962,14 @@ static volatile bool event_data_rx_en = false;
 static volatile bool event_shutdown_en = false;
 static volatile bool event_icu_width_en = false;
 static volatile bool event_icu_period_en = false;
+static volatile bool event_cmds_data_tx_en = false;
 static lbm_uint sym_event_can_sid;
 static lbm_uint sym_event_can_eid;
 static lbm_uint sym_event_data_rx;
 static lbm_uint sym_event_shutdown;
 static lbm_uint sym_event_icu_width;
 static lbm_uint sym_event_icu_period;
+static lbm_uint sym_event_cmds_data_tx = 0;
 
 static lbm_value ext_enable_event(lbm_value *args, lbm_uint argn) {
 	if (argn != 1 && argn != 2) {
@@ -2781,6 +2999,8 @@ static lbm_value ext_enable_event(lbm_value *args, lbm_uint argn) {
 		event_icu_width_en = en;
 	} else if (name == sym_event_icu_period) {
 		event_icu_period_en = en;
+	} else if (name == sym_event_cmds_data_tx) {
+		event_cmds_data_tx_en = en;
 	} else {
 		return ENC_SYM_EERROR;
 	}
@@ -3531,6 +3751,18 @@ static lbm_value ext_conf_set(lbm_value *args, lbm_uint argn) {
 	} else if (compare_symbol(name, &syms_vesc.m_ntc_motor_beta)) {
 		mcconf->m_ntc_motor_beta = lbm_dec_as_float(args[1]);
 		changed_mc = 1;
+	} else if (compare_symbol(name, &syms_vesc.m_ptc_motor_coeff)) {
+		mcconf->m_ptc_motor_coeff = lbm_dec_as_float(args[1]);
+		changed_mc = 1;
+	} else if (compare_symbol(name, &syms_vesc.m_ntcx_ptcx_temp_base)) {
+		mcconf->m_ntcx_ptcx_temp_base = lbm_dec_as_float(args[1]);
+		changed_mc = 1;
+	} else if (compare_symbol(name, &syms_vesc.m_ntcx_ptcx_res)) {
+		mcconf->m_ntcx_ptcx_res = lbm_dec_as_float(args[1]);
+		changed_mc = 1;
+	} else if (compare_symbol(name, &syms_vesc.m_fault_stop_time_ms)) {
+		mcconf->m_fault_stop_time_ms = lbm_dec_as_i32(args[1]);
+		changed_mc = 1;
 	} else if (compare_symbol(name, &syms_vesc.si_motor_poles)) {
 		mcconf->si_motor_poles = lbm_dec_as_i32(args[1]);
 		changed_mc = 1;
@@ -3546,11 +3778,23 @@ static lbm_value ext_conf_set(lbm_value *args, lbm_uint argn) {
 	} else if (compare_symbol(name, &syms_vesc.si_battery_ah)) {
 		mcconf->si_battery_ah = lbm_dec_as_float(args[1]);
 		changed_mc = 1;
+	} else if (compare_symbol(name, &syms_vesc.foc_encoder_offset)) {
+		mcconf->foc_encoder_offset = lbm_dec_as_float(args[1]);
+		changed_mc = 1;
+	} else if (compare_symbol(name, &syms_vesc.foc_encoder_inverted)) {
+		mcconf->foc_encoder_inverted = lbm_dec_as_i32(args[1]);
+		changed_mc = 1;
+	} else if (compare_symbol(name, &syms_vesc.foc_encoder_ratio)) {
+		mcconf->foc_encoder_ratio = lbm_dec_as_float(args[1]);
+		changed_mc = 1;
 	} else if (compare_symbol(name, &syms_vesc.foc_offsets_cal_mode)) {
 		mcconf->foc_offsets_cal_mode = lbm_dec_as_i32(args[1]);
 		changed_mc = 1;
 	} else if (compare_symbol(name, &syms_vesc.foc_short_ls_on_zero_duty)) {
 		mcconf->foc_short_ls_on_zero_duty = lbm_dec_as_i32(args[1]);
+		changed_mc = 1;
+	} else if (compare_symbol(name, &syms_vesc.foc_overmod_factor)) {
+		mcconf->foc_overmod_factor = lbm_dec_as_float(args[1]);
 		changed_mc = 1;
 	} else if (compare_symbol(name, &syms_vesc.controller_id)) {
 		appconf->controller_id = lbm_dec_as_i32(args[1]);
@@ -3623,6 +3867,12 @@ static lbm_value ext_conf_set(lbm_value *args, lbm_uint argn) {
 		} else if (compare_symbol(name, &syms_vesc.foc_observer_gain)) {
 			mcconf->foc_observer_gain = lbm_dec_as_float(args[1]) * 1e6;
 			changed_mc = 2;
+		} else if (compare_symbol(name, &syms_vesc.foc_observer_type)) {
+			mcconf->foc_observer_type = lbm_dec_as_i32(args[1]);
+			changed_mc = 2;
+		} else if (compare_symbol(name, &syms_vesc.foc_mtpa_mode)) {
+			mcconf->foc_mtpa_mode = lbm_dec_as_i32(args[1]);
+			changed_mc = 2;
 		} else if (compare_symbol(name, &syms_vesc.foc_hfi_voltage_start)) {
 			mcconf->foc_hfi_voltage_start = lbm_dec_as_float(args[1]);
 			changed_mc = 2;
@@ -3692,8 +3942,23 @@ static lbm_value ext_conf_set(lbm_value *args, lbm_uint argn) {
 		} else if (compare_symbol(name, &syms_vesc.foc_fw_duty_start)) {
 			mcconf->foc_fw_duty_start = lbm_dec_as_float(args[1]);
 			changed_mc = 2;
+		} else if (compare_symbol(name, &syms_vesc.foc_fw_ramp_time)) {
+			mcconf->foc_fw_ramp_time = lbm_dec_as_float(args[1]);
+			changed_mc = 2;
+		} else if (compare_symbol(name, &syms_vesc.foc_fw_q_current_factor)) {
+			mcconf->foc_fw_q_current_factor = lbm_dec_as_float(args[1]);
+			changed_mc = 2;
+		} else if (compare_symbol(name, &syms_vesc.m_encoder_counts)) {
+			mcconf->m_encoder_counts = lbm_dec_as_float(args[1]);
+			changed_mc = 2;
+		} else if (compare_symbol(name, &syms_vesc.m_sensor_port_mode)) {
+			mcconf->m_sensor_port_mode = lbm_dec_as_i32(args[1]);
+			changed_mc = 2;
 		} else if (compare_symbol(name, &syms_vesc.can_baud_rate)) {
 			appconf->can_baud_rate = lbm_dec_as_i32(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.can_mode)) {
+			appconf->can_mode = lbm_dec_as_i32(args[1]);
 			changed_app = 2;
 		} else if (compare_symbol(name, &syms_vesc.app_to_use)) {
 			appconf->app_to_use = lbm_dec_as_i32(args[1]);
@@ -3715,6 +3980,9 @@ static lbm_value ext_conf_set(lbm_value *args, lbm_uint argn) {
 			changed_app = 2;
 		} else if (compare_symbol(name, &syms_vesc.ppm_ramp_time_neg)) {
 			appconf->app_ppm_conf.ramp_time_neg = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.ppm_hyst)) {
+			appconf->app_ppm_conf.hyst = lbm_dec_as_float(args[1]);
 			changed_app = 2;
 		} else if (compare_symbol(name, &syms_vesc.adc_ctrl_type)) {
 			appconf->app_adc_conf.ctrl_type = lbm_dec_as_i32(args[1]);
@@ -3740,8 +4008,65 @@ static lbm_value ext_conf_set(lbm_value *args, lbm_uint argn) {
 		} else if (compare_symbol(name, &syms_vesc.adc_v1_max)) {
 			appconf->app_adc_conf.voltage_max = lbm_dec_as_float(args[1]);
 			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.adc_v1_center)) {
+			appconf->app_adc_conf.voltage_center = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.adc_v2_start)) {
+			appconf->app_adc_conf.voltage2_start = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.adc_v2_end)) {
+			appconf->app_adc_conf.voltage2_end = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.adc_tc)) {
+			appconf->app_adc_conf.tc = lbm_dec_as_i32(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.adc_tc_max_diff)) {
+			appconf->app_adc_conf.tc_max_diff = lbm_dec_as_float(args[1]);
+			changed_app = 2;
 		} else if (compare_symbol(name, &syms_vesc.pas_current_scaling)) {
 			appconf->app_pas_conf.current_scaling = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_ctrl_type)) {
+			appconf->app_chuk_conf.ctrl_type = lbm_dec_as_i32(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_hyst)) {
+			appconf->app_chuk_conf.hyst = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_ramp_time_pos)) {
+			appconf->app_chuk_conf.ramp_time_pos = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_ramp_time_neg)) {
+			appconf->app_chuk_conf.ramp_time_neg = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_cc_erpm_per_s)) {
+			appconf->app_chuk_conf.stick_erpm_per_s_in_cc = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_throttle_exp)) {
+			appconf->app_chuk_conf.throttle_exp = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_throttle_exp_brake)) {
+			appconf->app_chuk_conf.throttle_exp_brake = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_throttle_exp_mode)) {
+			appconf->app_chuk_conf.throttle_exp_mode = lbm_dec_as_i32(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_multi_esc)) {
+			appconf->app_chuk_conf.multi_esc = lbm_dec_as_i32(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_tc)) {
+			appconf->app_chuk_conf.tc = lbm_dec_as_i32(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_tc_max_diff)) {
+			appconf->app_chuk_conf.tc_max_diff = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_use_smart_rev)) {
+			appconf->app_chuk_conf.use_smart_rev = lbm_dec_as_i32(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_smart_rev_max_duty)) {
+			appconf->app_chuk_conf.smart_rev_max_duty = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_smart_rev_ramp_time)) {
+			appconf->app_chuk_conf.smart_rev_ramp_time = lbm_dec_as_float(args[1]);
 			changed_app = 2;
 		}
 	}
@@ -3753,6 +4078,7 @@ static lbm_value ext_conf_set(lbm_value *args, lbm_uint argn) {
 		}
 		res = ENC_SYM_TRUE;
 	} else if (changed_app > 0) {
+		commands_apply_appconf_hw_limits(appconf);
 		if (changed_app == 2) {
 			app_set_configuration(appconf);
 		}
@@ -3921,6 +4247,12 @@ static lbm_value ext_conf_get(lbm_value *args, lbm_uint argn) {
 		res = lbm_enc_i(mcconf->motor_type);
 	} else if (compare_symbol(name, &syms_vesc.foc_sensor_mode)) {
 		res = lbm_enc_i(mcconf->foc_sensor_mode);
+	} else if (compare_symbol(name, &syms_vesc.foc_encoder_offset)) {
+		res = lbm_enc_float(mcconf->foc_encoder_offset);
+	} else if (compare_symbol(name, &syms_vesc.foc_encoder_inverted)) {
+		res = lbm_enc_i(mcconf->foc_encoder_inverted);
+	} else if (compare_symbol(name, &syms_vesc.foc_encoder_ratio)) {
+		res = lbm_enc_float(mcconf->foc_encoder_ratio);
 	} else if (compare_symbol(name, &syms_vesc.foc_hfi_amb_mode)) {
 		res = lbm_enc_i(mcconf->foc_hfi_amb_mode);
 	} else if (compare_symbol(name, &syms_vesc.foc_hfi_amb_current)) {
@@ -3945,6 +4277,10 @@ static lbm_value ext_conf_get(lbm_value *args, lbm_uint argn) {
 		res = lbm_enc_float(mcconf->foc_motor_flux_linkage * 1e3);
 	} else if (compare_symbol(name, &syms_vesc.foc_observer_gain)) {
 		res = lbm_enc_float(mcconf->foc_observer_gain * 1e-6);
+	} else if (compare_symbol(name, &syms_vesc.foc_observer_type)) {
+		res = lbm_enc_i(mcconf->foc_observer_type);
+	} else if (compare_symbol(name, &syms_vesc.foc_mtpa_mode)) {
+		res = lbm_enc_i(mcconf->foc_mtpa_mode);
 	} else if (compare_symbol(name, &syms_vesc.foc_hfi_voltage_start)) {
 		res = lbm_enc_float(mcconf->foc_hfi_voltage_start);
 	} else if (compare_symbol(name, &syms_vesc.foc_hfi_voltage_run)) {
@@ -3993,8 +4329,14 @@ static lbm_value ext_conf_get(lbm_value *args, lbm_uint argn) {
 		res = lbm_enc_float(mcconf->foc_fw_current_max);
 	} else if (compare_symbol(name, &syms_vesc.foc_fw_duty_start)) {
 		res = lbm_enc_float(mcconf->foc_fw_duty_start);
+	} else if (compare_symbol(name, &syms_vesc.foc_fw_ramp_time)) {
+		res = lbm_enc_float(mcconf->foc_fw_ramp_time);
+	} else if (compare_symbol(name, &syms_vesc.foc_fw_q_current_factor)) {
+		res = lbm_enc_float(mcconf->foc_fw_q_current_factor);
 	} else if (compare_symbol(name, &syms_vesc.foc_short_ls_on_zero_duty)) {
 		res = lbm_enc_i(mcconf->foc_short_ls_on_zero_duty);
+	} else if (compare_symbol(name, &syms_vesc.foc_overmod_factor)) {
+		res = lbm_enc_float(mcconf->foc_overmod_factor);
 	} else if (compare_symbol(name, &syms_vesc.m_invert_direction)) {
 		res = lbm_enc_i(mcconf->m_invert_direction);
 	} else if (compare_symbol(name, &syms_vesc.m_out_aux_mode)) {
@@ -4003,6 +4345,18 @@ static lbm_value ext_conf_get(lbm_value *args, lbm_uint argn) {
 		res = lbm_enc_i(mcconf->m_motor_temp_sens_type);
 	} else if (compare_symbol(name, &syms_vesc.m_ntc_motor_beta)) {
 		res = lbm_enc_float(mcconf->m_ntc_motor_beta);
+	} else if (compare_symbol(name, &syms_vesc.m_ptc_motor_coeff)) {
+		res = lbm_enc_float(mcconf->m_ptc_motor_coeff);
+	} else if (compare_symbol(name, &syms_vesc.m_ntcx_ptcx_temp_base)) {
+		res = lbm_enc_float(mcconf->m_ntcx_ptcx_temp_base);
+	} else if (compare_symbol(name, &syms_vesc.m_ntcx_ptcx_res)) {
+		res = lbm_enc_float(mcconf->m_ntcx_ptcx_res);
+	} else if (compare_symbol(name, &syms_vesc.m_encoder_counts)) {
+		res = lbm_enc_float(mcconf->m_encoder_counts);
+	} else if (compare_symbol(name, &syms_vesc.m_sensor_port_mode)) {
+		res = lbm_enc_i(mcconf->m_sensor_port_mode);
+	} else if (compare_symbol(name, &syms_vesc.m_fault_stop_time_ms)) {
+		res = lbm_enc_i(mcconf->m_fault_stop_time_ms);
 	} else if (compare_symbol(name, &syms_vesc.si_motor_poles)) {
 		res = lbm_enc_i(mcconf->si_motor_poles);
 	} else if (compare_symbol(name, &syms_vesc.si_gear_ratio)) {
@@ -4023,6 +4377,8 @@ static lbm_value ext_conf_get(lbm_value *args, lbm_uint argn) {
 		res = lbm_enc_i(appconf->timeout_msec);
 	} else if (compare_symbol(name, &syms_vesc.can_baud_rate)) {
 		res = lbm_enc_i(appconf->can_baud_rate);
+	} else if (compare_symbol(name, &syms_vesc.can_mode)) {
+		res = lbm_enc_i(appconf->can_mode);
 	} else if (compare_symbol(name, &syms_vesc.can_status_rate_1)) {
 		res = lbm_enc_u(appconf->can_status_rate_1);
 	} else if (compare_symbol(name, &syms_vesc.can_status_msgs_r1)) {
@@ -4045,6 +4401,8 @@ static lbm_value ext_conf_get(lbm_value *args, lbm_uint argn) {
 		res = lbm_enc_float(appconf->app_ppm_conf.ramp_time_pos);
 	} else if (compare_symbol(name, &syms_vesc.ppm_ramp_time_neg)) {
 		res = lbm_enc_float(appconf->app_ppm_conf.ramp_time_neg);
+	} else if (compare_symbol(name, &syms_vesc.ppm_hyst)) {
+		res = lbm_enc_float(appconf->app_ppm_conf.hyst);
 	} else if (compare_symbol(name, &syms_vesc.adc_ctrl_type)) {
 		res = lbm_enc_i(appconf->app_adc_conf.ctrl_type);
 	} else if (compare_symbol(name, &syms_vesc.adc_ramp_time_pos)) {
@@ -4061,8 +4419,46 @@ static lbm_value ext_conf_get(lbm_value *args, lbm_uint argn) {
 		res = lbm_enc_float(appconf->app_adc_conf.voltage_min);
 	} else if (compare_symbol(name, &syms_vesc.adc_v1_max)) {
 		res = lbm_enc_float(appconf->app_adc_conf.voltage_max);
+	} else if (compare_symbol(name, &syms_vesc.adc_v1_center)) {
+		res = lbm_enc_float(appconf->app_adc_conf.voltage_center);
+	} else if (compare_symbol(name, &syms_vesc.adc_v2_start)) {
+		res = lbm_enc_float(appconf->app_adc_conf.voltage2_start);
+	} else if (compare_symbol(name, &syms_vesc.adc_v2_end)) {
+		res = lbm_enc_float(appconf->app_adc_conf.voltage2_end);
+	} else if (compare_symbol(name, &syms_vesc.adc_tc)) {
+		res = lbm_enc_i(appconf->app_adc_conf.tc);
+	} else if (compare_symbol(name, &syms_vesc.adc_tc_max_diff)) {
+		res = lbm_enc_float(appconf->app_adc_conf.tc_max_diff);
 	} else if (compare_symbol(name, &syms_vesc.pas_current_scaling)) {
 		res = lbm_enc_float(appconf->app_pas_conf.current_scaling);
+	} else if (compare_symbol(name, &syms_vesc.vr_ctrl_type)) {
+		res = lbm_enc_i(appconf->app_chuk_conf.ctrl_type);
+	} else if (compare_symbol(name, &syms_vesc.vr_hyst)) {
+		res = lbm_enc_float(appconf->app_chuk_conf.hyst);
+	} else if (compare_symbol(name, &syms_vesc.vr_ramp_time_pos)) {
+		res = lbm_enc_float(appconf->app_chuk_conf.ramp_time_pos);
+	} else if (compare_symbol(name, &syms_vesc.vr_ramp_time_neg)) {
+		res = lbm_enc_float(appconf->app_chuk_conf.ramp_time_neg);
+	} else if (compare_symbol(name, &syms_vesc.vr_cc_erpm_per_s)) {
+		res = lbm_enc_float(appconf->app_chuk_conf.stick_erpm_per_s_in_cc);
+	} else if (compare_symbol(name, &syms_vesc.vr_throttle_exp)) {
+		res = lbm_enc_float(appconf->app_chuk_conf.throttle_exp);
+	} else if (compare_symbol(name, &syms_vesc.vr_throttle_exp_brake)) {
+		res = lbm_enc_float(appconf->app_chuk_conf.throttle_exp_brake);
+	} else if (compare_symbol(name, &syms_vesc.vr_throttle_exp_mode)) {
+		res = lbm_enc_i(appconf->app_chuk_conf.throttle_exp_mode);
+	} else if (compare_symbol(name, &syms_vesc.vr_multi_esc)) {
+		res = lbm_enc_i(appconf->app_chuk_conf.multi_esc);
+	} else if (compare_symbol(name, &syms_vesc.vr_tc)) {
+		res = lbm_enc_i(appconf->app_chuk_conf.tc);
+	} else if (compare_symbol(name, &syms_vesc.vr_tc_max_diff)) {
+		res = lbm_enc_float(appconf->app_chuk_conf.tc_max_diff);
+	} else if (compare_symbol(name, &syms_vesc.vr_use_smart_rev)) {
+		res = lbm_enc_i(appconf->app_chuk_conf.use_smart_rev);
+	} else if (compare_symbol(name, &syms_vesc.vr_smart_rev_max_duty)) {
+		res = lbm_enc_float(appconf->app_chuk_conf.smart_rev_max_duty);
+	} else if (compare_symbol(name, &syms_vesc.vr_smart_rev_ramp_time)) {
+		res = lbm_enc_float(appconf->app_chuk_conf.smart_rev_ramp_time);
 	}
 
 	if (defaultcfg) {
@@ -4090,9 +4486,12 @@ static lbm_value ext_conf_store(lbm_value *args, lbm_uint argn) {
 	bool res_app = conf_general_store_app_configuration(appconf);
 	mempools_free_appconf(appconf);
 
-	conf_general_store_backup_data();
-
 	return lbm_enc_sym((res_mc && res_app) ? SYM_TRUE : SYM_NIL);
+}
+
+static lbm_value ext_store_backup(lbm_value *args, lbm_uint argn) {
+	(void)args; (void)argn;
+	return lbm_enc_sym(conf_general_store_backup_data() ? SYM_TRUE : SYM_NIL);
 }
 
 typedef struct {
@@ -4123,6 +4522,7 @@ static void detect_task(void *arg) {
 static lbm_value ext_conf_detect_foc(lbm_value *args, lbm_uint argn) {
 	LBM_CHECK_ARGN_NUMBER(6);
 	static detect_args a;
+
 	a.detect_can = lbm_dec_as_i32(args[0]);
 	a.max_power_loss = lbm_dec_as_float(args[1]);
 	a.min_current_in = lbm_dec_as_float(args[2]);
@@ -4131,8 +4531,17 @@ static lbm_value ext_conf_detect_foc(lbm_value *args, lbm_uint argn) {
 	a.sl_erpm = lbm_dec_as_float(args[5]);
 	a.id = lbm_get_current_cid();
 	a.motor = mc_interface_get_motor_thread();
+
+#ifdef HW_HAS_DUAL_MOTORS
+	if (!lispif_spawn(detect_task, 1024, "lbm_detect", &a)) {
+		return ENC_SYM_MERROR;
+	}
+	lbm_block_ctx_from_extension();
+#else
 	lbm_block_ctx_from_extension();
 	worker_execute(detect_task, &a);
+#endif
+
 	return ENC_SYM_TRUE;
 }
 
@@ -4304,8 +4713,8 @@ static lbm_value ext_conf_measure_ind(lbm_value *args, lbm_uint argn) {
 		return ENC_SYM_EERROR;
 	}
 
-	worker_execute(measure_inductance_task, &a);
 	lbm_block_ctx_from_extension();
+	worker_execute(measure_inductance_task, &a);
 	return ENC_SYM_TRUE;
 }
 
@@ -4347,16 +4756,19 @@ static lbm_value ext_conf_restore_app(lbm_value *args, lbm_uint argn) {
 }
 
 static lbm_value ext_conf_dc_cal(lbm_value *args, lbm_uint argn) {
-	if (argn != 1) {
+	if (argn != 0 && argn != 1) {
 		lbm_set_error_reason((char*)lbm_error_str_num_args);
 		return ENC_SYM_TERROR;
 	}
 
-	if (!is_symbol_true_false(args[0])) {
-		return ENC_SYM_TERROR;
-	}
+	int cal_res = 0;
+	if (argn == 1) {
+		if (!is_symbol_true_false(args[0])) {
+			return ENC_SYM_TERROR;
+		}
 
-	int cal_res = mcpwm_foc_dc_cal(lbm_is_symbol_true(args[0]));
+		cal_res = mcpwm_foc_dc_cal(lbm_is_symbol_true(args[0]));
+	}
 
 	if (cal_res < 0) {
 		return ENC_SYM_NIL;
@@ -4376,6 +4788,62 @@ static lbm_value ext_conf_dc_cal(lbm_value *args, lbm_uint argn) {
 	}
 }
 
+static lbm_value ext_conf_dc_cal_set(lbm_value *args, lbm_uint argn) {
+	volatile mc_configuration *conf = (volatile mc_configuration*)mc_interface_get_configuration();
+
+	for (lbm_uint i = 0;i < argn;i++) {
+		if (lbm_is_number(args[i])) {
+			float val = lbm_dec_as_float(args[i]);
+
+			switch (i) {
+				case 0: conf->foc_offsets_current[0] = val; break;
+				case 1: conf->foc_offsets_current[1] = val; break;
+				case 2: conf->foc_offsets_current[2] = val; break;
+				case 3: conf->foc_offsets_voltage[0] = val; break;
+				case 4: conf->foc_offsets_voltage[1] = val; break;
+				case 5: conf->foc_offsets_voltage[2] = val; break;
+				case 6: conf->foc_offsets_voltage_undriven[0] = val; break;
+				case 7: conf->foc_offsets_voltage_undriven[1] = val; break;
+				case 8: conf->foc_offsets_voltage_undriven[2] = val; break;
+				default: break;
+			}
+		}
+	}
+
+	return ENC_SYM_TRUE;
+}
+
+static lbm_value ext_conf_enc_sincos(lbm_value *args, lbm_uint argn) {
+	volatile mc_configuration *conf = (volatile mc_configuration*)mc_interface_get_configuration();
+
+	for (lbm_uint i = 0;i < argn;i++) {
+		if (lbm_is_number(args[i])) {
+			float val = lbm_dec_as_float(args[i]);
+
+			switch (i) {
+				case 0: conf->m_encoder_sin_amp = val; break;
+				case 1: conf->m_encoder_cos_amp = val; break;
+				case 2: conf->m_encoder_sin_offset = val; break;
+				case 3: conf->m_encoder_cos_offset = val; break;
+				case 4: conf->m_encoder_sincos_filter_constant = val; break;
+				case 5: conf->m_encoder_sincos_phase_correction = val; break;
+				default: break;
+			}
+		}
+	}
+
+	encoder_update_config(conf);
+
+	lbm_value res = ENC_SYM_NIL;
+	res = lbm_cons(lbm_enc_float(conf->m_encoder_sincos_phase_correction), res);
+	res = lbm_cons(lbm_enc_float(conf->m_encoder_sincos_filter_constant), res);
+	res = lbm_cons(lbm_enc_float(conf->m_encoder_cos_offset), res);
+	res = lbm_cons(lbm_enc_float(conf->m_encoder_sin_offset), res);
+	res = lbm_cons(lbm_enc_float(conf->m_encoder_cos_amp), res);
+	res = lbm_cons(lbm_enc_float(conf->m_encoder_sin_amp), res);
+	return res;
+}
+
 static lbm_value ext_conf_get_limits(lbm_value *args, lbm_uint argn) {
 	(void)args; (void)argn;
 	volatile const mc_configuration *conf = mc_interface_get_configuration();
@@ -4385,6 +4853,232 @@ static lbm_value ext_conf_get_limits(lbm_value *args, lbm_uint argn) {
 	res = lbm_cons(lbm_enc_float(conf->lo_current_max), res);
 	res = lbm_cons(lbm_enc_float(conf->lo_current_min), res);
 	return res;
+}
+
+typedef struct {
+	float current;
+	float duty;
+	float erpm_per_sec;
+	float resistance;
+	float inductance;
+	lbm_cid id;
+	int motor;
+} measure_lambda_enc_args;
+
+static void measure_lambda_enc_task(void *arg) {
+	int restart_cnt = lispif_get_restart_cnt();
+
+	measure_lambda_enc_args *a = (measure_lambda_enc_args*)arg;
+
+	lbm_flat_value_t v;
+	bool ok = false;
+	if (lbm_start_flatten(&v, 50)) {
+		mc_interface_select_motor_thread(a->motor);
+
+		float linkage = 0.0, linkage_undriven = 0.0, undriven_samples = 0.0;
+		bool result;
+
+		int fault = conf_general_measure_flux_linkage_openloop(
+				a->current, a->duty, a->erpm_per_sec, a->resistance, a->inductance,
+				&linkage, &linkage_undriven, &undriven_samples, &result);
+
+		mc_interface_select_motor_thread(1);
+
+		if (restart_cnt != lispif_get_restart_cnt()) {
+			return;
+		}
+
+		if (fault) {
+			f_i(&v, fault);
+		} else if (!result) {
+			f_sym(&v, SYM_NIL);
+		} else {
+			f_cons(&v);						// +1
+			f_float(&v, linkage);			// +5
+			f_cons(&v);						// +1
+			f_float(&v, linkage_undriven);	// +5
+			f_cons(&v);						// +1
+			f_float(&v, undriven_samples);	// +5
+			f_sym(&v, SYM_NIL);				// +1
+		}
+
+		lbm_finish_flatten(&v);
+		if (lbm_unblock_ctx(a->id, &v)) {
+			ok = true;
+		} else {
+			lbm_free(v.buf);
+		}
+	}
+
+	if (!ok) {
+		lbm_unblock_ctx_unboxed(a->id, ENC_SYM_NIL);
+	}
+}
+
+static lbm_value ext_conf_detect_lambda_enc(lbm_value *args, lbm_uint argn) {
+	LBM_CHECK_ARGN_NUMBER(5);
+
+	float current = lbm_dec_as_float(args[0]);
+	float duty = lbm_dec_as_float(args[1]);
+	float erpm_per_sec = lbm_dec_as_float(args[2]);
+	float resistance = lbm_dec_as_float(args[3]) * 1.0e-3;
+	float inductance = lbm_dec_as_float(args[4]) * 1.0e-6;
+
+	if (!(current > 0.0 && current <= mc_interface_get_configuration()->l_current_max &&
+			erpm_per_sec > 0.0 && duty > 0.02 && duty <= 0.9 && resistance >= 0.0 && inductance >= 0.0)) {
+		lbm_set_error_reason((char*)lbm_error_str_incorrect_arg);
+		return ENC_SYM_TERROR;
+	}
+
+	if (mc_interface_get_configuration()->motor_type != MOTOR_TYPE_FOC) {
+		return ENC_SYM_EERROR;
+	}
+
+	static measure_lambda_enc_args a;
+	a.current = current;
+	a.duty = duty;
+	a.erpm_per_sec = erpm_per_sec;
+	a.resistance = resistance;
+	a.inductance = inductance;
+	a.id = lbm_get_current_cid();
+	a.motor = mc_interface_get_motor_thread();
+
+#ifdef HW_HAS_DUAL_MOTORS
+	if (!lispif_spawn(measure_lambda_enc_task, 1024, "lbm_detect", &a)) {
+		return ENC_SYM_MERROR;
+	}
+	lbm_block_ctx_from_extension();
+#else
+	lbm_block_ctx_from_extension();
+	worker_execute(measure_lambda_enc_task, &a);
+#endif
+
+	return ENC_SYM_TRUE;
+}
+
+typedef struct {
+	float current;
+	lbm_cid id;
+	int motor;
+} measure_hall_args;
+
+static void measure_hall_task(void *arg) {
+	int restart_cnt = lispif_get_restart_cnt();
+
+	measure_hall_args *a = (measure_hall_args*)arg;
+
+	lbm_flat_value_t v;
+	bool ok = false;
+	if (lbm_start_flatten(&v, 20)) {
+		mc_interface_select_motor_thread(a->motor);
+
+		uint8_t hall_tab[8];
+		bool result;
+		int fault = mcpwm_foc_hall_detect(a->current, hall_tab, &result);
+
+		mc_interface_select_motor_thread(1);
+
+		if (restart_cnt != lispif_get_restart_cnt()) {
+			return;
+		}
+
+		if (fault) {
+			f_i(&v, fault);
+		} else if (!result) {
+			f_sym(&v, SYM_NIL);
+		} else {
+			f_lbm_array(&v, 8, hall_tab);
+		}
+
+		lbm_finish_flatten(&v);
+		if (lbm_unblock_ctx(a->id, &v)) {
+			ok = true;
+		} else {
+			lbm_free(v.buf);
+		}
+	}
+
+	if (!ok) {
+		lbm_unblock_ctx_unboxed(a->id, ENC_SYM_NIL);
+	}
+}
+
+static lbm_value ext_conf_detect_hall(lbm_value *args, lbm_uint argn) {
+	LBM_CHECK_ARGN_NUMBER(1);
+
+	float current = lbm_dec_as_float(args[0]);
+
+	if (!(current > 0.0 && current <= mc_interface_get_configuration()->l_current_max)) {
+		lbm_set_error_reason((char*)lbm_error_str_incorrect_arg);
+		return ENC_SYM_TERROR;
+	}
+
+	if (mc_interface_get_configuration()->motor_type != MOTOR_TYPE_FOC) {
+		return ENC_SYM_EERROR;
+	}
+
+	static measure_hall_args a;
+	a.current = current;
+	a.id = lbm_get_current_cid();
+	a.motor = mc_interface_get_motor_thread();
+
+#ifdef HW_HAS_DUAL_MOTORS
+	if (!lispif_spawn(measure_hall_task, 1024, "lbm_detect", &a)) {
+		return ENC_SYM_MERROR;
+	}
+	lbm_block_ctx_from_extension();
+#else
+	lbm_block_ctx_from_extension();
+	worker_execute(measure_hall_task, &a);
+#endif
+
+	return ENC_SYM_TRUE;
+}
+
+static lbm_value ext_conf_remap_as504x(lbm_value *args, lbm_uint argn) {
+	for (lbm_uint i = 0;i < argn;i++) {
+		if (lbm_is_symbol(args[i])) {
+
+			stm32_gpio_t *port; uint32_t pin;
+			if (lispif_symbol_to_io(lbm_dec_sym(args[0]), &port, &pin)) {
+				switch (i) {
+				case 0: {
+					encoder_cfg_as504x.sw_spi.nss_gpio = port;
+					encoder_cfg_as504x.sw_spi.nss_pin = pin;
+					break;
+				}
+
+				case 1: {
+					encoder_cfg_as504x.sw_spi.sck_gpio = port;
+					encoder_cfg_as504x.sw_spi.sck_pin = pin;
+					break;
+				}
+
+				case 2: {
+					encoder_cfg_as504x.sw_spi.mosi_gpio = port;
+					encoder_cfg_as504x.sw_spi.mosi_pin = pin;
+					break;
+				}
+
+				case 3: {
+					encoder_cfg_as504x.sw_spi.miso_gpio = port;
+					encoder_cfg_as504x.sw_spi.miso_pin = pin;
+					break;
+				}
+
+				default:
+					break;
+				}
+			} else {
+				return ENC_SYM_EERROR;
+			}
+		}
+	}
+
+	volatile mc_configuration *conf = (volatile mc_configuration*)mc_interface_get_configuration();
+	encoder_update_config(conf);
+
+	return ENC_SYM_TRUE;
 }
 
 static lbm_value ext_uavcan_last_rawcmd(lbm_value *args, lbm_uint argn) {
@@ -4805,7 +5499,7 @@ static volatile bool icu_width_done = false;
 static volatile bool icu_period_done = false;
 
 // Remote Messages
-#define RMSG_SLOT_NUM	5
+#define RMSG_SLOT_NUM	8
 
 typedef struct {
 	lbm_cid cid;
@@ -5104,19 +5798,6 @@ static lbm_value ext_shutdown_hold(lbm_value *args, lbm_uint argn) {
 	return ENC_SYM_TRUE;
 }
 
-static lbm_value ext_const_heap_erase(lbm_value *args, lbm_uint argn) {
-	(void)args; (void)argn;
-
-	if (lispif_const_heap_max_ind() > 0) {
-		lbm_set_error_reason("Const heap already in use");
-		return ENC_SYM_EERROR;
-	}
-
-	flash_helper_erase_code(CODE_IND_LISP_CONST);
-	return ENC_SYM_TRUE;
-}
-
-
 // Remote Messages
 
 // (canmsg-recv slot timeout)
@@ -5220,6 +5901,174 @@ static lbm_value ext_pwm_set_duty(lbm_value *args, lbm_uint argn) {
 	return lbm_enc_float(pwm_servo_set_duty(lbm_dec_as_float(args[0])));
 }
 
+// Commands interface
+typedef struct {
+	PACKET_STATE_t cmds_packet_state;
+	void *cmds_thd_stack;
+	size_t cmds_thd_stack_size;
+	unsigned char buffer[PACKET_MAX_PL_LEN + 8];
+	unsigned int len;
+} cmds_send_data;
+
+static cmds_send_data *cmds_state = 0;
+static thread_t *cmds_thd = 0;
+static volatile bool cmds_running = false;
+
+static void cmds_send_raw(unsigned char *buffer, unsigned int len) {
+	if (event_cmds_data_tx_en) {
+		int restart_cnt = lispif_get_restart_cnt();
+
+		lbm_flat_value_t v;
+		if (start_flatten_with_gc(&v, len + 30)) {
+			f_cons(&v);
+			f_sym(&v, sym_event_cmds_data_tx);
+			f_cons(&v);
+			f_lbm_array(&v, len, buffer);
+			f_sym(&v, ENC_SYM_NIL);
+			lbm_finish_flatten(&v);
+
+			int timeout = 500;
+			while (!lbm_event(&v)) {
+				if (restart_cnt != lispif_get_restart_cnt()) {
+					return;
+				}
+
+				if (timeout == 0 || lispif_is_eval_task() || !event_cmds_data_tx_en) {
+					lbm_free(v.buf);
+					return;
+				}
+
+				chThdSleepMilliseconds(1);
+				timeout--;
+			}
+		}
+	}
+}
+
+static void cmds_send_packet(unsigned char *buffer, unsigned int len) {
+	if (cmds_state) {
+		packet_send_packet(buffer, len, &(cmds_state->cmds_packet_state));
+	}
+}
+
+static THD_FUNCTION(cmds_send_task, arg) {
+	(void)arg;
+	chRegSetThreadName("lbm_cmds");
+	commands_process_packet(cmds_state->buffer, cmds_state->len, cmds_send_packet);
+	cmds_running = false;
+}
+
+static void cmds_proc(unsigned char *data, unsigned int len) {
+	if (cmds_running) {
+		return;
+	}
+
+	if (!cmds_state) {
+		return;
+	}
+
+	memcpy(cmds_state->buffer, data, len);
+	cmds_state->len = len;
+
+	cmds_running = true;
+	cmds_thd = chThdCreateStatic(cmds_state->cmds_thd_stack, cmds_state->cmds_thd_stack_size, NORMALPRIO, cmds_send_task, 0);
+}
+
+static lbm_value ext_cmds_start_stop(lbm_value *args, lbm_uint argn) {
+	if (argn != 0 && argn != 1) {
+		lbm_set_error_reason((char*)lbm_error_str_num_args);
+		return ENC_SYM_TERROR;
+	}
+
+	bool start = true;
+	if (argn >= 1) {
+		if (!is_symbol_true_false(args[0])) {
+			return ENC_SYM_TERROR;
+		}
+
+		start = lbm_is_symbol_true(args[0]);
+	}
+
+	if (cmds_running && cmds_thd) {
+		chThdWait(cmds_thd);
+		cmds_thd = 0;
+		cmds_running = false;
+	}
+
+	if (cmds_state) {
+		lbm_free(cmds_state->cmds_thd_stack);
+		lbm_free(cmds_state);
+		cmds_state = 0;
+	}
+
+	if (start) {
+		cmds_state = lbm_malloc(sizeof(cmds_send_data));
+
+		if (!cmds_state) {
+			return ENC_SYM_MERROR;
+		}
+
+		cmds_state->cmds_thd_stack = lbm_malloc(2048);
+		cmds_state->cmds_thd_stack_size = 2048;
+
+		if (!cmds_state->cmds_thd_stack) {
+			lbm_free(cmds_state);
+			cmds_state = 0;
+			return ENC_SYM_MERROR;
+		}
+
+		packet_init(cmds_send_raw, cmds_proc, &(cmds_state->cmds_packet_state));
+	}
+
+	return ENC_SYM_TRUE;
+}
+
+static lbm_value ext_cmds_proc(lbm_value *args, lbm_uint argn) {
+	LBM_CHECK_ARGN(1);
+
+	lbm_array_header_t *arr = lbm_dec_array_header(args[0]);
+
+	if (!arr) {
+		lbm_set_error_reason((char*)lbm_error_str_incorrect_arg);
+		return ENC_SYM_TERROR;
+	}
+
+	if (!cmds_state) {
+		lbm_set_error_reason("Cmds not started");
+		return ENC_SYM_EERROR;
+	}
+
+	for (unsigned int i = 0;i < arr->size;i++) {
+		packet_process_byte(((unsigned char *)arr->data)[i], &(cmds_state->cmds_packet_state));
+	}
+
+	return ENC_SYM_TRUE;
+}
+
+#ifdef FOC_PROFILE_EN
+static lbm_value ext_prof_trig(lbm_value *args, lbm_uint argn) {
+	(void)args; (void)argn;
+	FOC_PROFILE_TRIGGER();
+	return ENC_SYM_TRUE;
+}
+
+static lbm_value ext_prof_result(lbm_value *args, lbm_uint argn) {
+	(void)args; (void)argn;
+
+	lbm_value prof_data = ENC_SYM_NIL;
+
+	for (int i = 0; i < g_foc_profile.ind;i++) {
+		int ind = g_foc_profile.ind - i - 1;
+		prof_data = lbm_cons(lbm_cons(
+				lbm_enc_i(g_foc_profile.line[ind]),
+				lbm_enc_float(timer_calc_diff(g_foc_profile.t_start, g_foc_profile.time[ind]))
+		), prof_data);
+	}
+
+	return prof_data;
+}
+#endif
+
 static const char* dyn_functions[] = {
 		"(defun uart-read-bytes (buffer n ofs)"
 		"(let ((rd (uart-read buffer n ofs)))"
@@ -5270,308 +6119,312 @@ void lispif_load_vesc_extensions(void) {
 	palSetPadMode(HW_ADC_EXT2_GPIO, HW_ADC_EXT2_PIN, PAL_MODE_INPUT_ANALOG);
 #endif
 
-	lbm_add_symbol_const("hw-esc", &sym_hw_esc);
-	lbm_add_symbol_const("event-can-sid", &sym_event_can_sid);
-	lbm_add_symbol_const("event-can-eid", &sym_event_can_eid);
-	lbm_add_symbol_const("event-data-rx", &sym_event_data_rx);
-	lbm_add_symbol_const("event-shutdown", &sym_event_shutdown);
-	lbm_add_symbol_const("event-icu-width", &sym_event_icu_width);
-	lbm_add_symbol_const("event-icu-period", &sym_event_icu_period);
+		lbm_add_symbol_const("hw-esc", &sym_hw_esc);
+		lbm_add_symbol_const("event-can-sid", &sym_event_can_sid);
+		lbm_add_symbol_const("event-can-eid", &sym_event_can_eid);
+		lbm_add_symbol_const("event-data-rx", &sym_event_data_rx);
+		lbm_add_symbol_const("event-shutdown", &sym_event_shutdown);
+		lbm_add_symbol_const("event-icu-width", &sym_event_icu_width);
+		lbm_add_symbol_const("event-icu-period", &sym_event_icu_period);
+		lbm_add_symbol_const("event-cmds-data-tx", &sym_event_cmds_data_tx);
 
-	memset(&syms_vesc, 0, sizeof(syms_vesc));
+		memset(&syms_vesc, 0, sizeof(syms_vesc));
 
-	// Various commands
-	lbm_add_extension("print", ext_print);
-	lbm_add_extension("set-print-prefix", ext_set_print_prefix);
-	lbm_add_extension("puts", ext_puts);
-	lbm_add_extension("timeout-reset", ext_reset_timeout);
-	lbm_add_extension("get-ppm", ext_get_ppm);
-	lbm_add_extension("get-ppm-age", ext_get_ppm_age);
-	lbm_add_extension("set-servo", ext_set_servo);
-	lbm_add_extension("get-vin", ext_get_vin);
-	lbm_add_extension("select-motor", ext_select_motor);
-	lbm_add_extension("get-selected-motor", ext_get_selected_motor);
-	lbm_add_extension("get-bms-val", ext_get_bms_val);
-	lbm_add_extension("set-bms-val", ext_set_bms_val);
-	lbm_add_extension("send-bms-can", ext_send_bms_can);
-	lbm_add_extension("set-bms-chg-allowed", ext_set_bms_chg_allowed);
-	lbm_add_extension("bms-force-balance", ext_bms_force_balance);
-	lbm_add_extension("bms-zero-offset", ext_bms_zero_offset);
-	lbm_add_extension("get-adc", ext_get_adc);
-	lbm_add_extension("override-temp-motor", ext_override_temp_motor);
-	lbm_add_extension("get-adc-decoded", ext_get_adc_decoded);
-	lbm_add_extension("systime", ext_systime);
-	lbm_add_extension("secs-since", ext_secs_since);
-	lbm_add_extension("set-aux", ext_set_aux);
-	lbm_add_extension("event-enable", ext_enable_event);
-	lbm_add_extension("get-imu-rpy", ext_get_imu_rpy);
-	lbm_add_extension("get-imu-quat", ext_get_imu_quat);
-	lbm_add_extension("get-imu-acc", ext_get_imu_acc);
-	lbm_add_extension("get-imu-gyro", ext_get_imu_gyro);
-	lbm_add_extension("get-imu-mag", ext_get_imu_mag);
-	lbm_add_extension("get-imu-acc-derot", ext_get_imu_acc_derot);
-	lbm_add_extension("get-imu-gyro-derot", ext_get_imu_gyro_derot);
-	lbm_add_extension("send-data", ext_send_data);
-	lbm_add_extension("recv-data", ext_recv_data);
-	lbm_add_extension("get-remote-state", ext_get_remote_state);
-	lbm_add_extension("eeprom-store-f", ext_eeprom_store_f);
-	lbm_add_extension("eeprom-read-f", ext_eeprom_read_f);
-	lbm_add_extension("eeprom-store-i", ext_eeprom_store_i);
-	lbm_add_extension("eeprom-read-i", ext_eeprom_read_i);
-	lbm_add_extension("sysinfo", ext_sysinfo);
-	lbm_add_extension("set-odometer", ext_set_odometer);
-	lbm_add_extension("stats", ext_stats);
-	lbm_add_extension("stats-reset", ext_stats_reset);
-	lbm_add_extension("import", ext_empty);
-	lbm_add_extension("icu-start", ext_icu_start);
-	lbm_add_extension("icu-width", ext_icu_width);
-	lbm_add_extension("icu-period", ext_icu_period);
-	lbm_add_extension("crc16", ext_crc16);
-	lbm_add_extension("crc32", ext_crc32);
-	lbm_add_extension("buf-resize", ext_buf_resize);
-	lbm_add_extension("shutdown-hold", ext_shutdown_hold);
-	lbm_add_extension("const-heap-erase", ext_const_heap_erase);
+		// Various commands
+		lbm_add_extension("print", ext_print);
+		lbm_add_extension("set-print-prefix", ext_set_print_prefix);
+		lbm_add_extension("puts", ext_puts);
+		lbm_add_extension("timeout-reset", ext_reset_timeout);
+		lbm_add_extension("get-ppm", ext_get_ppm);
+		lbm_add_extension("get-ppm-age", ext_get_ppm_age);
+		lbm_add_extension("set-servo", ext_set_servo);
+		lbm_add_extension("get-vin", ext_get_vin);
+		lbm_add_extension("select-motor", ext_select_motor);
+		lbm_add_extension("get-selected-motor", ext_get_selected_motor);
+		lbm_add_extension("get-bms-val", ext_get_bms_val);
+		lbm_add_extension("set-bms-val", ext_set_bms_val);
+		lbm_add_extension("send-bms-can", ext_send_bms_can);
+		lbm_add_extension("set-bms-chg-allowed", ext_set_bms_chg_allowed);
+		lbm_add_extension("bms-force-balance", ext_bms_force_balance);
+		lbm_add_extension("bms-zero-offset", ext_bms_zero_offset);
+		lbm_add_extension("get-adc", ext_get_adc);
+		lbm_add_extension("override-temp-motor", ext_override_temp_motor);
+		lbm_add_extension("get-adc-decoded", ext_get_adc_decoded);
+		lbm_add_extension("systime", ext_systime);
+		lbm_add_extension("secs-since", ext_secs_since);
+		lbm_add_extension("set-aux", ext_set_aux);
+		lbm_add_extension("event-enable", ext_enable_event);
+		lbm_add_extension("get-imu-rpy", ext_get_imu_rpy);
+		lbm_add_extension("get-imu-quat", ext_get_imu_quat);
+		lbm_add_extension("get-imu-acc", ext_get_imu_acc);
+		lbm_add_extension("get-imu-gyro", ext_get_imu_gyro);
+		lbm_add_extension("get-imu-mag", ext_get_imu_mag);
+		lbm_add_extension("get-imu-acc-derot", ext_get_imu_acc_derot);
+		lbm_add_extension("get-imu-gyro-derot", ext_get_imu_gyro_derot);
+		lbm_add_extension("send-data", ext_send_data);
+		lbm_add_extension("recv-data", ext_recv_data);
+		lbm_add_extension("get-remote-state", ext_get_remote_state);
+		lbm_add_extension("eeprom-store-f", ext_eeprom_store_f);
+		lbm_add_extension("eeprom-read-f", ext_eeprom_read_f);
+		lbm_add_extension("eeprom-store-i", ext_eeprom_store_i);
+		lbm_add_extension("eeprom-read-i", ext_eeprom_read_i);
+		lbm_add_extension("sysinfo", ext_sysinfo);
+		lbm_add_extension("set-odometer", ext_set_odometer);
+		lbm_add_extension("stats", ext_stats);
+		lbm_add_extension("stats-reset", ext_stats_reset);
+		lbm_add_extension("import", ext_empty);
+		lbm_add_extension("icu-start", ext_icu_start);
+		lbm_add_extension("icu-width", ext_icu_width);
+		lbm_add_extension("icu-period", ext_icu_period);
+		lbm_add_extension("crc16", ext_crc16);
+		lbm_add_extension("crc32", ext_crc32);
+		lbm_add_extension("buf-resize", ext_buf_resize);
+		lbm_add_extension("shutdown-hold", ext_shutdown_hold);
 
-	// APP commands
-	lbm_add_extension("app-adc-detach", ext_app_adc_detach);
-	lbm_add_extension("app-adc-override", ext_app_adc_override);
-	lbm_add_extension("app-adc-range-ok", ext_app_adc_range_ok);
-	lbm_add_extension("app-ppm-detach", ext_app_ppm_detach);
-	lbm_add_extension("app-ppm-override", ext_app_ppm_override);
-	lbm_add_extension("set-remote-state", ext_set_remote_state);
-	lbm_add_extension("app-disable-output", ext_app_disable_output);
-	lbm_add_extension("app-is-output-disabled", ext_app_is_output_disabled);
-	lbm_add_extension("app-pas-get-rpm", ext_app_pas_get_rpm);
+		// APP commands
+		lbm_add_extension("app-adc-detach", ext_app_adc_detach);
+		lbm_add_extension("app-adc-override", ext_app_adc_override);
+		lbm_add_extension("app-adc-range-ok", ext_app_adc_range_ok);
+		lbm_add_extension("app-ppm-detach", ext_app_ppm_detach);
+		lbm_add_extension("app-ppm-override", ext_app_ppm_override);
+		lbm_add_extension("set-remote-state", ext_set_remote_state);
+		lbm_add_extension("app-disable-output", ext_app_disable_output);
+		lbm_add_extension("app-is-output-disabled", ext_app_is_output_disabled);
+		lbm_add_extension("app-pas-get-rpm", ext_app_pas_get_rpm);
 
-	// Motor set commands
-	lbm_add_extension("set-current", ext_set_current);
-	lbm_add_extension("set-current-rel", ext_set_current_rel);
-	lbm_add_extension("set-duty", ext_set_duty);
-	lbm_add_extension("set-brake", ext_set_brake);
-	lbm_add_extension("set-brake-rel", ext_set_brake_rel);
-	lbm_add_extension("set-handbrake", ext_set_handbrake);
-	lbm_add_extension("set-handbrake-rel", ext_set_handbrake_rel);
-	lbm_add_extension("set-rpm", ext_set_rpm);
-	lbm_add_extension("set-pos", ext_set_pos);
-	lbm_add_extension("foc-openloop", ext_foc_openloop);
+		// Motor set commands
+		lbm_add_extension("set-current", ext_set_current);
+		lbm_add_extension("set-current-rel", ext_set_current_rel);
+		lbm_add_extension("set-duty", ext_set_duty);
+		lbm_add_extension("set-brake", ext_set_brake);
+		lbm_add_extension("set-brake-rel", ext_set_brake_rel);
+		lbm_add_extension("set-handbrake", ext_set_handbrake);
+		lbm_add_extension("set-handbrake-rel", ext_set_handbrake_rel);
+		lbm_add_extension("set-rpm", ext_set_rpm);
+		lbm_add_extension("set-pos", ext_set_pos);
+		lbm_add_extension("foc-openloop", ext_foc_openloop);
+		lbm_add_extension("foc-openloop-phase", ext_foc_openloop_phase);
+//		lbm_add_extension("foc-set-fw-override", ext_foc_set_fw_override);
+		lbm_add_extension("set-kill-sw", ext_set_kill_sw);
 
-	lbm_add_extension("foc-beep", ext_foc_beep);
-	lbm_add_extension("foc-play-tone", ext_foc_play_tone);
-	lbm_add_extension("foc-play-samples", ext_foc_play_samples);
-	lbm_add_extension("foc-play-stop", ext_foc_play_stop);
+		lbm_add_extension("foc-beep", ext_foc_beep);
+		lbm_add_extension("foc-play-tone", ext_foc_play_tone);
+		lbm_add_extension("foc-play-samples", ext_foc_play_samples);
+		lbm_add_extension("foc-play-stop", ext_foc_play_stop);
 
-	// Motor get commands
-	lbm_add_extension("get-current", ext_get_current);
-	lbm_add_extension("get-current-dir", ext_get_current_dir);
-	lbm_add_extension("get-current-in", ext_get_current_in);
-	lbm_add_extension("get-id", ext_get_id);
-	lbm_add_extension("get-iq", ext_get_iq);
-	lbm_add_extension("get-id-set", ext_get_id_set);
-	lbm_add_extension("get-iq-set", ext_get_iq_set);
-	lbm_add_extension("get-vd", ext_get_vd);
-	lbm_add_extension("get-vq", ext_get_vq);
-	lbm_add_extension("get-est-lambda", ext_foc_est_lambda);
-	lbm_add_extension("get-est-res", ext_foc_est_res);
-	lbm_add_extension("get-est-ind", ext_foc_est_ind);
-	lbm_add_extension("get-hfi-res", ext_foc_hfi_res);
-	lbm_add_extension("get-duty", ext_get_duty);
-	lbm_add_extension("get-rpm", ext_get_rpm);
-	lbm_add_extension("get-rpm-fast", ext_get_rpm_fast);
-	lbm_add_extension("get-rpm-faster", ext_get_rpm_faster);
-	lbm_add_extension("get-rpm-set", ext_get_rpm_set);
-	lbm_add_extension("get-pos", ext_get_pos);
-	lbm_add_extension("get-temp-fet", ext_get_temp_fet);
-	lbm_add_extension("get-temp-mot", ext_get_temp_mot);
-	lbm_add_extension("get-speed", ext_get_speed);
-	lbm_add_extension("get-speed-set", ext_get_speed_set);
-	lbm_add_extension("get-dist", ext_get_dist);
-	lbm_add_extension("get-dist-abs", ext_get_dist_abs);
-	lbm_add_extension("get-batt", ext_get_batt);
-	lbm_add_extension("get-fault", ext_get_fault);
-	lbm_add_extension("get-ah", ext_get_ah);
-	lbm_add_extension("get-wh", ext_get_wh);
-	lbm_add_extension("get-ah-chg", ext_get_ah_chg);
-	lbm_add_extension("get-wh-chg", ext_get_wh_chg);
+		// Motor get commands
+		lbm_add_extension("get-current", ext_get_current);
+		lbm_add_extension("get-current-dir", ext_get_current_dir);
+		lbm_add_extension("get-current-in", ext_get_current_in);
+		lbm_add_extension("get-id", ext_get_id);
+		lbm_add_extension("get-iq", ext_get_iq);
+		lbm_add_extension("get-id-set", ext_get_id_set);
+		lbm_add_extension("get-iq-set", ext_get_iq_set);
+		lbm_add_extension("get-vd", ext_get_vd);
+		lbm_add_extension("get-vq", ext_get_vq);
+		lbm_add_extension("get-est-lambda", ext_foc_est_lambda);
+		lbm_add_extension("get-est-res", ext_foc_est_res);
+		lbm_add_extension("get-est-ind", ext_foc_est_ind);
+		lbm_add_extension("get-hfi-res", ext_foc_hfi_res);
+		lbm_add_extension("get-duty", ext_get_duty);
+		lbm_add_extension("get-rpm", ext_get_rpm);
+		lbm_add_extension("get-rpm-fast", ext_get_rpm_fast);
+		lbm_add_extension("get-rpm-faster", ext_get_rpm_faster);
+		lbm_add_extension("get-rpm-set", ext_get_rpm_set);
+		lbm_add_extension("get-pos", ext_get_pos);
+		lbm_add_extension("get-temp-fet", ext_get_temp_fet);
+		lbm_add_extension("get-temp-mot", ext_get_temp_mot);
+		lbm_add_extension("get-temp-mot-res", ext_get_temp_mot_res);
+		lbm_add_extension("get-speed", ext_get_speed);
+		lbm_add_extension("get-speed-set", ext_get_speed_set);
+		lbm_add_extension("get-dist", ext_get_dist);
+		lbm_add_extension("get-dist-abs", ext_get_dist_abs);
+		lbm_add_extension("get-batt", ext_get_batt);
+		lbm_add_extension("get-fault", ext_get_fault);
+		lbm_add_extension("get-ah", ext_get_ah);
+		lbm_add_extension("get-wh", ext_get_wh);
+		lbm_add_extension("get-ah-chg", ext_get_ah_chg);
+		lbm_add_extension("get-wh-chg", ext_get_wh_chg);
 
-	// Positions
-	lbm_add_extension("get-encoder", ext_get_encoder);
-	lbm_add_extension("set-encoder", ext_set_encoder);
-	lbm_add_extension("get-encoder-error-rate", ext_get_encoder_error_rate);
-	lbm_add_extension("pos-pid-now", ext_pos_pid_now);
-	lbm_add_extension("pos-pid-set", ext_pos_pid_set);
-	lbm_add_extension("pos-pid-error", ext_pos_pid_error);
-	lbm_add_extension("phase-motor", ext_phase_motor);
-	lbm_add_extension("phase-encoder", ext_phase_encoder);
-	lbm_add_extension("phase-hall", ext_phase_hall);
-	lbm_add_extension("phase-observer", ext_phase_observer);
-	lbm_add_extension("observer-error", ext_observer_error);
+		// Positions
+		lbm_add_extension("get-encoder", ext_get_encoder);
+		lbm_add_extension("set-encoder", ext_set_encoder);
+		lbm_add_extension("get-encoder-error-rate", ext_get_encoder_error_rate);
+		lbm_add_extension("encoder-index-found", ext_encoder_index_found);
+		lbm_add_extension("pos-pid-now", ext_pos_pid_now);
+		lbm_add_extension("pos-pid-set", ext_pos_pid_set);
+		lbm_add_extension("pos-pid-error", ext_pos_pid_error);
+		lbm_add_extension("phase-motor", ext_phase_motor);
+		lbm_add_extension("phase-encoder", ext_phase_encoder);
+		lbm_add_extension("phase-hall", ext_phase_hall);
+		lbm_add_extension("phase-observer", ext_phase_observer);
+		lbm_add_extension("observer-error", ext_observer_error);
 
-	// Setup values
-	lbm_add_extension("setup-ah", ext_setup_ah);
-	lbm_add_extension("setup-ah-chg", ext_setup_ah_chg);
-	lbm_add_extension("setup-wh", ext_setup_wh);
-	lbm_add_extension("setup-wh-chg", ext_setup_wh_chg);
-	lbm_add_extension("setup-current", ext_setup_current);
-	lbm_add_extension("setup-current-in", ext_setup_current_in);
-	lbm_add_extension("setup-num-vescs", ext_setup_num_vescs);
+		// Setup values
+		lbm_add_extension("setup-ah", ext_setup_ah);
+		lbm_add_extension("setup-ah-chg", ext_setup_ah_chg);
+		lbm_add_extension("setup-wh", ext_setup_wh);
+		lbm_add_extension("setup-wh-chg", ext_setup_wh_chg);
+		lbm_add_extension("setup-current", ext_setup_current);
+		lbm_add_extension("setup-current-in", ext_setup_current_in);
+		lbm_add_extension("setup-num-vescs", ext_setup_num_vescs);
 
-	// CAN-comands
-	lbm_add_extension("can-msg-age", ext_can_msg_age);
-	lbm_add_extension("canset-current", ext_can_current);
-	lbm_add_extension("canset-current-rel", ext_can_current_rel);
-	lbm_add_extension("canset-duty", ext_can_duty);
-	lbm_add_extension("canset-brake", ext_can_brake);
-	lbm_add_extension("canset-brake-rel", ext_can_brake_rel);
-	lbm_add_extension("canset-rpm", ext_can_rpm);
-	lbm_add_extension("canset-pos", ext_can_pos);
+		// CAN-comands
+		lbm_add_extension("can-msg-age", ext_can_msg_age);
+		lbm_add_extension("canset-current", ext_can_current);
+		lbm_add_extension("canset-current-rel", ext_can_current_rel);
+		lbm_add_extension("canset-duty", ext_can_duty);
+		lbm_add_extension("canset-brake", ext_can_brake);
+		lbm_add_extension("canset-brake-rel", ext_can_brake_rel);
+		lbm_add_extension("canset-rpm", ext_can_rpm);
+		lbm_add_extension("canset-pos", ext_can_pos);
 
-	lbm_add_extension("canget-current", ext_can_get_current);
-	lbm_add_extension("canget-current-dir", ext_can_get_current_dir);
-	lbm_add_extension("canget-current-in", ext_can_get_current_in);
-	lbm_add_extension("canget-duty", ext_can_get_duty);
-	lbm_add_extension("canget-rpm", ext_can_get_rpm);
-	lbm_add_extension("canget-temp-fet", ext_can_get_temp_fet);
-	lbm_add_extension("canget-temp-motor", ext_can_get_temp_motor);
-	lbm_add_extension("canget-speed", ext_can_get_speed);
-	lbm_add_extension("canget-dist", ext_can_get_dist);
-	lbm_add_extension("canget-ppm", ext_can_get_ppm);
-	lbm_add_extension("canget-adc", ext_can_get_adc);
-	lbm_add_extension("canget-vin", ext_can_get_vin);
+		lbm_add_extension("canget-current", ext_can_get_current);
+		lbm_add_extension("canget-current-dir", ext_can_get_current_dir);
+		lbm_add_extension("canget-current-in", ext_can_get_current_in);
+		lbm_add_extension("canget-duty", ext_can_get_duty);
+		lbm_add_extension("canget-rpm", ext_can_get_rpm);
+		lbm_add_extension("canget-temp-fet", ext_can_get_temp_fet);
+		lbm_add_extension("canget-temp-motor", ext_can_get_temp_motor);
+		lbm_add_extension("canget-speed", ext_can_get_speed);
+		lbm_add_extension("canget-dist", ext_can_get_dist);
+		lbm_add_extension("canget-ppm", ext_can_get_ppm);
+		lbm_add_extension("canget-adc", ext_can_get_adc);
+		lbm_add_extension("canget-vin", ext_can_get_vin);
 
-	lbm_add_extension("can-list-devs", ext_can_list_devs);
-	lbm_add_extension("can-scan", ext_can_scan);
-	lbm_add_extension("can-ping", ext_can_ping);
-	lbm_add_extension("can-send-sid", ext_can_send_sid);
-	lbm_add_extension("can-send-eid", ext_can_send_eid);
-	lbm_add_extension("can-recv-sid", ext_can_recv_sid);
-	lbm_add_extension("can-recv-eid", ext_can_recv_eid);
-	lbm_add_extension("can-cmd", ext_can_cmd);
-	lbm_add_extension("can-local-id", ext_can_local_id);
-	lbm_add_extension("can-update-baud", ext_can_update_baud);
+		lbm_add_extension("can-list-devs", ext_can_list_devs);
+		lbm_add_extension("can-scan", ext_can_scan);
+		lbm_add_extension("can-ping", ext_can_ping);
+		lbm_add_extension("can-send-sid", ext_can_send_sid);
+		lbm_add_extension("can-send-eid", ext_can_send_eid);
+		lbm_add_extension("can-recv-sid", ext_can_recv_sid);
+		lbm_add_extension("can-recv-eid", ext_can_recv_eid);
+		lbm_add_extension("can-cmd", ext_can_cmd);
+		lbm_add_extension("can-local-id", ext_can_local_id);
+		lbm_add_extension("can-update-baud", ext_can_update_baud);
 
-	// Math
-	lbm_add_extension("throttle-curve", ext_throttle_curve);
-	lbm_add_extension("rand", ext_rand);
-	lbm_add_extension("rand-max", ext_rand_max);
+		// Math
+		lbm_add_extension("throttle-curve", ext_throttle_curve);
+		lbm_add_extension("rand", ext_rand);
+		lbm_add_extension("rand-max", ext_rand_max);
 
-	// Bit operations
-	lbm_add_extension("bits-enc-int", ext_bits_enc_int);
-	lbm_add_extension("bits-dec-int", ext_bits_dec_int);
+		// Bit operations
+		lbm_add_extension("bits-enc-int", ext_bits_enc_int);
+		lbm_add_extension("bits-dec-int", ext_bits_dec_int);
 
-	// Raw readings
-	lbm_add_extension("raw-adc-current", ext_raw_adc_current);
-	lbm_add_extension("raw-adc-voltage", ext_raw_adc_voltage);
-	lbm_add_extension("raw-mod-alpha", ext_raw_mod_alpha);
-	lbm_add_extension("raw-mod-beta", ext_raw_mod_beta);
-	lbm_add_extension("raw-mod-alpha-measured", ext_raw_mod_alpha_measured);
-	lbm_add_extension("raw-mod-beta-measured", ext_raw_mod_beta_measured);
-	lbm_add_extension("raw-hall", ext_raw_hall);
+		// Raw readings
+		lbm_add_extension("raw-adc-current", ext_raw_adc_current);
+		lbm_add_extension("raw-adc-voltage", ext_raw_adc_voltage);
+		lbm_add_extension("raw-mod-alpha", ext_raw_mod_alpha);
+		lbm_add_extension("raw-mod-beta", ext_raw_mod_beta);
+		lbm_add_extension("raw-mod-alpha-measured", ext_raw_mod_alpha_measured);
+		lbm_add_extension("raw-mod-beta-measured", ext_raw_mod_beta_measured);
+		lbm_add_extension("raw-hall", ext_raw_hall);
 
-	// UART
-	uart_started = false;
-	lbm_add_extension("uart-start", ext_uart_start);
-	lbm_add_extension("uart-stop", ext_uart_stop);
-	lbm_add_extension("uart-write", ext_uart_write);
-	lbm_add_extension("uart-read", ext_uart_read);
+		// UART
+		uart_started = false;
+		lbm_add_extension("uart-start", ext_uart_start);
+		lbm_add_extension("uart-stop", ext_uart_stop);
+		lbm_add_extension("uart-write", ext_uart_write);
+		lbm_add_extension("uart-read", ext_uart_read);
 
-	// I2C
-	i2c_started = false;
-	lbm_add_extension("i2c-start", ext_i2c_start);
-	lbm_add_extension("i2c-tx-rx", ext_i2c_tx_rx);
-	lbm_add_extension("i2c-restore", ext_i2c_restore);
-	lbm_add_extension("i2c-detect-addr", ext_i2c_detect_addr);
+		// I2C
+		i2c_started = false;
+		lbm_add_extension("i2c-start", ext_i2c_start);
+		lbm_add_extension("i2c-tx-rx", ext_i2c_tx_rx);
+		lbm_add_extension("i2c-restore", ext_i2c_restore);
+		lbm_add_extension("i2c-detect-addr", ext_i2c_detect_addr);
 
-	// GPIO
-	lbm_add_extension("gpio-configure", ext_gpio_configure);
-	lbm_add_extension("gpio-write", ext_gpio_write);
-	lbm_add_extension("gpio-read", ext_gpio_read);
+		// GPIO
+		lbm_add_extension("gpio-configure", ext_gpio_configure);
+		lbm_add_extension("gpio-write", ext_gpio_write);
+		lbm_add_extension("gpio-read", ext_gpio_read);
 
-	// Configuration
-	lbm_add_extension("conf-set", ext_conf_set);
-	lbm_add_extension("conf-get", ext_conf_get);
-	lbm_add_extension("conf-store", ext_conf_store);
-	lbm_add_extension("conf-detect-foc", ext_conf_detect_foc);
-	lbm_add_extension("conf-set-pid-offset", ext_conf_set_pid_offset);
-	lbm_add_extension("conf-measure-res", ext_conf_measure_res);
-	lbm_add_extension("conf-measure-ind", ext_conf_measure_ind);
-	lbm_add_extension("conf-restore-mc", ext_conf_restore_mc);
-	lbm_add_extension("conf-restore-app", ext_conf_restore_app);
-	lbm_add_extension("conf-dc-cal", ext_conf_dc_cal);
-	lbm_add_extension("conf-get-limits", ext_conf_get_limits);
+		// Configuration
+		lbm_add_extension("conf-set", ext_conf_set);
+		lbm_add_extension("conf-get", ext_conf_get);
+		lbm_add_extension("conf-store", ext_conf_store);
+		lbm_add_extension("store-backup", ext_store_backup);
+		lbm_add_extension("conf-detect-foc", ext_conf_detect_foc);
+		lbm_add_extension("conf-set-pid-offset", ext_conf_set_pid_offset);
+		lbm_add_extension("conf-measure-res", ext_conf_measure_res);
+		lbm_add_extension("conf-measure-ind", ext_conf_measure_ind);
+		lbm_add_extension("conf-restore-mc", ext_conf_restore_mc);
+		lbm_add_extension("conf-restore-app", ext_conf_restore_app);
+		lbm_add_extension("conf-dc-cal", ext_conf_dc_cal);
+		lbm_add_extension("conf-dc-cal-set", ext_conf_dc_cal_set);
+		lbm_add_extension("conf-enc-sincos", ext_conf_enc_sincos);
+		lbm_add_extension("conf-get-limits", ext_conf_get_limits);
+		lbm_add_extension("conf-detect-lambda-enc", ext_conf_detect_lambda_enc);
+		lbm_add_extension("conf-detect-hall", ext_conf_detect_hall);
+		lbm_add_extension("conf-remap-as504x", ext_conf_remap_as504x);
 
-	// Native libraries
-	lbm_add_extension("load-native-lib", ext_load_native_lib);
-	lbm_add_extension("unload-native-lib", ext_unload_native_lib);
+		// Native libraries
+		lbm_add_extension("load-native-lib", ext_load_native_lib);
+		lbm_add_extension("unload-native-lib", ext_unload_native_lib);
 
-	// UAVCAN
-	lbm_add_extension("uavcan-last-rawcmd", ext_uavcan_last_rawcmd);
-	lbm_add_extension("uavcan-last-rpmcmd", ext_uavcan_last_rpmcmd);
+		// UAVCAN
+		lbm_add_extension("uavcan-last-rawcmd", ext_uavcan_last_rawcmd);
+		lbm_add_extension("uavcan-last-rpmcmd", ext_uavcan_last_rpmcmd);
 
-	// Lbm settings
-	lbm_add_extension("lbm-set-quota", ext_lbm_set_quota);
-	lbm_add_extension("lbm-set-gc-stack-size", ext_lbm_set_gc_stack_size);
+		// Lbm settings
+		lbm_add_extension("lbm-set-quota", ext_lbm_set_quota);
+		lbm_add_extension("lbm-set-gc-stack-size", ext_lbm_set_gc_stack_size);
 
-	// Plot
-	lbm_add_extension("plot-init", ext_plot_init);
-	lbm_add_extension("plot-add-graph", ext_plot_add_graph);
-	lbm_add_extension("plot-set-graph", ext_plot_set_graph);
-	lbm_add_extension("plot-send-points", ext_plot_send_points);
+		// Plot
+		lbm_add_extension("plot-init", ext_plot_init);
+		lbm_add_extension("plot-add-graph", ext_plot_add_graph);
+		lbm_add_extension("plot-set-graph", ext_plot_set_graph);
+		lbm_add_extension("plot-send-points", ext_plot_send_points);
 
-	// IO-boards
-	lbm_add_extension("ioboard-get-adc", ext_ioboard_get_adc);
-	lbm_add_extension("ioboard-get-digital", ext_ioboard_get_digital);
-	lbm_add_extension("ioboard-set-digital", ext_ioboard_set_digital);
-	lbm_add_extension("ioboard-set-pwm", ext_ioboard_set_pwm);
+		// IO-boards
+		lbm_add_extension("ioboard-get-adc", ext_ioboard_get_adc);
+		lbm_add_extension("ioboard-get-digital", ext_ioboard_get_digital);
+		lbm_add_extension("ioboard-set-digital", ext_ioboard_set_digital);
+		lbm_add_extension("ioboard-set-pwm", ext_ioboard_set_pwm);
 
-	// Logging
-	lbm_add_extension("log-start", ext_log_start);
-	lbm_add_extension("log-stop", ext_log_stop);
-	lbm_add_extension("log-config-field", ext_log_config_field);
-	lbm_add_extension("log-send-f32", ext_log_send_f32);
-	lbm_add_extension("log-send-f64", ext_log_send_f64);
+		// Logging
+		lbm_add_extension("log-start", ext_log_start);
+		lbm_add_extension("log-stop", ext_log_stop);
+		lbm_add_extension("log-config-field", ext_log_config_field);
+		lbm_add_extension("log-send-f32", ext_log_send_f32);
+		lbm_add_extension("log-send-f64", ext_log_send_f64);
 
-	// GNSS
-	lbm_add_extension("gnss-lat-lon", ext_gnss_lat_lon);
-	lbm_add_extension("gnss-height", ext_gnss_height);
-	lbm_add_extension("gnss-speed", ext_gnss_speed);
-	lbm_add_extension("gnss-hdop", ext_gnss_hdop);
-	lbm_add_extension("gnss-date-time", ext_gnss_date_time);
-	lbm_add_extension("gnss-age", ext_gnss_age);
+		// GNSS
+		lbm_add_extension("gnss-lat-lon", ext_gnss_lat_lon);
+		lbm_add_extension("gnss-height", ext_gnss_height);
+		lbm_add_extension("gnss-speed", ext_gnss_speed);
+		lbm_add_extension("gnss-hdop", ext_gnss_hdop);
+		lbm_add_extension("gnss-date-time", ext_gnss_date_time);
+		lbm_add_extension("gnss-age", ext_gnss_age);
 
-	// CAN-Messages
-	lbm_add_extension("canmsg-recv", ext_canmsg_recv);
-	lbm_add_extension("canmsg-send", ext_canmsg_send);
+		// CAN-Messages
+		lbm_add_extension("canmsg-recv", ext_canmsg_recv);
+		lbm_add_extension("canmsg-send", ext_canmsg_send);
 
-	// PWM
-	lbm_add_extension("pwm-start", ext_pwm_start);
-	lbm_add_extension("pwm-stop", ext_pwm_stop);
-	lbm_add_extension("pwm-set-duty", ext_pwm_set_duty);
+		// PWM
+		lbm_add_extension("pwm-start", ext_pwm_start);
+		lbm_add_extension("pwm-stop", ext_pwm_stop);
+		lbm_add_extension("pwm-set-duty", ext_pwm_set_duty);
 
-	// Extra extensions
-	lbm_array_extensions_init();
-	lbm_math_extensions_init();
-	lbm_string_extensions_init();
-	lbm_mutex_extensions_init();
-	lbm_dyn_lib_init();
+		// Commands
+		lbm_add_extension("cmds-start-stop", ext_cmds_start_stop);
+		lbm_add_extension("cmds-proc", ext_cmds_proc);
+
+		// Profiling
+#ifdef FOC_PROFILE_EN
+		lbm_add_extension("prof-trig", ext_prof_trig);
+		lbm_add_extension("prof-result", ext_prof_result);
+#endif
+
+		// Extension libraries
+		lbm_array_extensions_init();
+		lbm_math_extensions_init();
+		lbm_string_extensions_init();
+		lbm_mutex_extensions_init();
+		lbm_dyn_lib_init();
 
 	lbm_set_dynamic_load_callback(dynamic_loader);
-}
-
-static bool start_flatten_with_gc(lbm_flat_value_t *v, size_t buffer_size) {
-	if (lbm_start_flatten(v, buffer_size)) {
-		return true;
-	}
-
-	int timeout = 3;
-	uint32_t gc_last = lbm_heap_state.gc_num;
-	lbm_request_gc();
-
-	while (lbm_heap_state.gc_num <= gc_last && timeout > 0) {
-		chThdSleepMilliseconds(1);
-		timeout--;
-	}
-
-	return lbm_start_flatten(v, buffer_size);
 }
 
 void lispif_process_can(uint32_t can_id, uint8_t *data8, int len, bool is_ext) {
@@ -5678,11 +6531,11 @@ void lispif_process_rmsg(int slot, unsigned char *data, unsigned int len) {
 		f_lbm_array(&v, len, data);
 		lbm_finish_flatten(&v);
 
-		if (!lbm_unblock_ctx(rmsg_slots[slot].cid, &v)) {
+		if (lbm_unblock_ctx(rmsg_slots[slot].cid, &v)) {
+			rmsg_slots[slot].cid = -1;
+		} else {
 			lbm_free(v.buf);
 		}
-
-		rmsg_slots[slot].cid = -1;
 	}
 
 	chMtxUnlock(&rmsg_mutex);
@@ -5697,6 +6550,14 @@ void lispif_disable_all_events(void) {
 		chMtxUnlock(&rmsg_mutex);
 	}
 
+	if (cmds_running && cmds_thd) {
+		chThdWait(cmds_thd);
+	}
+
+	cmds_state = 0;
+	cmds_thd = 0;
+	cmds_running = false;
+
 	lispif_stop_lib();
 	event_can_sid_en = false;
 	event_can_eid_en = false;
@@ -5707,6 +6568,7 @@ void lispif_disable_all_events(void) {
 	event_shutdown_en = false;
 	event_icu_width_en = false;
 	event_icu_period_en = false;
+	event_cmds_data_tx_en = false;
 	// Give thread a chance to stop
 	chThdSleepMilliseconds(5);
 }
@@ -5738,22 +6600,55 @@ bool lispif_symbol_to_io(lbm_uint sym, stm32_gpio_t **port, uint32_t *pin) {
 	} else if (compare_symbol(sym, &syms_vesc.pin_hall3)) {
 		*port = HW_HALL_ENC_GPIO3; *pin = HW_HALL_ENC_PIN3;
 		return true;
-	} else if (compare_symbol(sym, &syms_vesc.pin_adc1)) {
+	}
+#ifdef HW_HALL_ENC_GPIO4
+	else if (compare_symbol(sym, &syms_vesc.pin_hall4)) {
+		*port = HW_HALL_ENC_GPIO4; *pin = HW_HALL_ENC_PIN4;
+		return true;
+	}
+#endif
+#ifdef HW_HALL_ENC_GPIO5
+	else if (compare_symbol(sym, &syms_vesc.pin_hall5)) {
+		*port = HW_HALL_ENC_GPIO5; *pin = HW_HALL_ENC_PIN5;
+		return true;
+	}
+#endif
+#ifdef HW_HALL_ENC_GPIO6
+	else if (compare_symbol(sym, &syms_vesc.pin_hall6)) {
+		*port = HW_HALL_ENC_GPIO6; *pin = HW_HALL_ENC_PIN6;
+		return true;
+	}
+#endif
 #ifdef HW_ADC_EXT_GPIO
+	else if (compare_symbol(sym, &syms_vesc.pin_adc1)) {
 		*port = HW_ADC_EXT_GPIO; *pin = HW_ADC_EXT_PIN;
 		return true;
+	}
 #endif
-	} else if (compare_symbol(sym, &syms_vesc.pin_adc2)) {
 #ifdef HW_ADC_EXT2_GPIO
+	else if (compare_symbol(sym, &syms_vesc.pin_adc2)) {
 		*port = HW_ADC_EXT2_GPIO; *pin = HW_ADC_EXT2_PIN;
 		return true;
+	}
 #endif
-	} else if (compare_symbol(sym, &syms_vesc.pin_ppm)) {
+#ifdef HW_ADC_EXT3_GPIO
+	else if (compare_symbol(sym, &syms_vesc.pin_adc3)) {
+		*port = HW_ADC_EXT3_GPIO; *pin = HW_ADC_EXT3_PIN;
+		return true;
+	}
+#endif
+#ifdef HW_ADC_EXT4_GPIO
+	else if (compare_symbol(sym, &syms_vesc.pin_adc4)) {
+		*port = HW_ADC_EXT4_GPIO; *pin = HW_ADC_EXT4_PIN;
+		return true;
+	}
+#endif
 #ifdef HW_ICU_GPIO
+	else if (compare_symbol(sym, &syms_vesc.pin_ppm)) {
 		*port = HW_ICU_GPIO; *pin = HW_ICU_PIN;
 		return true;
-#endif
 	}
+#endif
 #ifdef PIN_HW_1
 	else if (compare_symbol(sym, &syms_vesc.pin_hw_1)) {
 		*port = PIN_HW_1_GPIO; *pin = PIN_HW_1;
@@ -5773,5 +6668,3 @@ char* lispif_print_prefix(void) {
 	print_prefix[sizeof(print_prefix) - 1] = 0;
 	return print_prefix;
 }
-
-#pragma GCC pop_options

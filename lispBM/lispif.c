@@ -777,6 +777,10 @@ void lispif_add_ext_load_callback(void (*p_func)(void)) {
 	}
 }
 
+bool lispif_is_eval_task(void) {
+	return eval_tp == chThdGetSelfX();
+}
+
 lbm_uint lispif_const_heap_max_ind(void)  {
 	return const_heap_max_ind;
 }

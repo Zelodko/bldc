@@ -36,6 +36,7 @@ void lispif_lock_lbm(void);
 void lispif_unlock_lbm(void);
 bool lispif_restart(bool print, bool load_code, bool load_imports);
 void lispif_add_ext_load_callback(void (*p_func)(void));
+bool lispif_is_eval_task(void);
 lbm_uint lispif_const_heap_max_ind(void);
 void lispif_disable_all_events(void);
 bool lispif_symbol_to_io(lbm_uint sym, stm32_gpio_t **port, uint32_t *pin);
@@ -50,6 +51,6 @@ void lispif_process_rmsg(int slot, unsigned char *data, unsigned int len);
 
 void lispif_load_vesc_extensions(void);
 char* lispif_print_prefix(void);
-lib_thread lispif_spawn(void (*func)(void*), size_t stack_size, char *name, void *arg);
+lib_thread lispif_spawn(void (*func)(void*), size_t stack_size, const char *name, void *arg);
 
 #endif /* LISPBM_LISPIF_H_ */
