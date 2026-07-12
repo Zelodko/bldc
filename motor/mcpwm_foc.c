@@ -237,6 +237,10 @@ static void timer_reinit(int f_zv) {
 	// software will catch the BRK flag to report the fault code
 	TIM1->BDTR |= TIM_BDTR_BKE;
 	TIM8->BDTR |= TIM_BDTR_BKE;
+#ifdef BRK_HIGH
+	TIM1->BDTR |= TIM_BDTR_BKP;
+	TIM8->BDTR |= TIM_BDTR_BKP;
+#endif
 #endif
 
 	// Enable Capture/Compare Preload
@@ -576,8 +580,11 @@ void mcpwm_foc_init(mc_configuration *conf_m1, mc_configuration *conf_m2) {
 
 		// Wait for fault codes to go away
 		if (!m_dccal_done) {
-			while (mc_interface_get_fault() != FAULT_CODE_NONE) {
+			while ((mc_interface_get_fault() != FAULT_CODE_NONE) &&
+					(mc_interface_get_fault() != FAULT_CODE_OVER_TEMP_MOTOR)) {
+
 				chThdSleepMilliseconds(1);
+
 				if (UTILS_AGE_S(cal_start_time) >= cal_start_timeout) {
 					m_dccal_done = true;
 					break;
@@ -3819,9 +3826,9 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 #endif
 
 #ifdef HW_HAS_DUAL_MOTORS
-	mc_interface_mc_timer_isr(is_second_motor);
+	mc_interface_mc_timer_isr(is_second_motor, dt);
 #else
-	mc_interface_mc_timer_isr(false);
+	mc_interface_mc_timer_isr(false, dt);
 #endif
 
 	m_isr_motor = 0;
