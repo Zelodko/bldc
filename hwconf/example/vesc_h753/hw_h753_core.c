@@ -613,74 +613,35 @@ static void terminal_shutdown_now(int argc, const char **argv) {
 }
 
 /**
- * hw_sample_shutdown_button - return false if shutdown is requested, true otherwise
+ * hw_sample_shutdown_button - instantaneous sample of the shutdown button state.
  *
- * Behavior: after determining the unpressed level, look for rising edges or values
- * that are clearly above the unpressed level (2 x Threshold higher), triggering a counter.
+ * HW_SHUTDOWN_SENSE_PIN is a plain digital input with an external pulldown that
+ * reads high while the button is physically held and low otherwise - no ADC,
+ * no on-die debounce needed here. shutdown.c's generic shutdown_thread already
+ * majority-votes ~70 calls to this function over a 700ms window to debounce and
+ * detect a press-release click, so this just needs to return a faithful,
+ * repeatable level sample each call - it must NOT be stateful/one-shot, or the
+ * vote in shutdown.c can never see a stable result.
  *
- * Once triggered, the counter keeps incrementing as long as the level is 2 x Threshold higher
- * than the normal/unpressed value, otherwise it gets reset to zero.
- *
- * Once the counter reaches the threshold the button is considered pressed, provided that
- * the erpm is below 100. A very short (20ms) beep will go off.
- * Shutdown actually happens on the falling edge when the press is over.
- *
- * If the motor is spinning faster, then a 3s press is required. Buzzer will beep once the
- * time has been reached. Again, shutdown happens on the falling edge.
- *
- * Normal shutdown time:    0.5s
- * Emergency shutdown time: 3.0s
+ * The one bit of state kept here is a boot-time guard: if this board's power-on
+ * sequence is driven by holding this same physical button (common pattern - an
+ * external latch circuit powers the board on while held, and firmware only
+ * takes over from there), the sense pin can still read high for the tail end of
+ * that press when this function starts getting called. Reporting "not pressed"
+ * until we've seen at least one real low reading prevents that trailing release
+ * from being misread as an immediate shutdown click right after power-on.
  */
-
-static uint16_t high_count = 0;
-
-static enum {
-    BTN_BLOCKED_INITIAL,  // New state
-    BTN_IDLE,
-    BTN_COUNTING,
-    BTN_WAIT_RELEASE
-} state = BTN_BLOCKED_INITIAL;
+static bool m_initial_release_seen = false;
 
 bool hw_sample_shutdown_button(void) {
     bool is_high = (palReadPad(HW_SHUTDOWN_SENSE_GPIO, HW_SHUTDOWN_SENSE_PIN) == PAL_HIGH);
-    switch (state) {
 
-        case BTN_BLOCKED_INITIAL:
-            // Ignore everything until first release
-            if (!is_high) {
-                state = BTN_IDLE;
-            }
-            return true;
-
-        case BTN_IDLE:
-            if (is_high) {
-                high_count = 1;
-                state = BTN_COUNTING;
-            }
-            return true;
-
-        case BTN_COUNTING:
-            if (is_high) {
-                high_count++;
-                if (high_count >= 100) {
-                    state = BTN_WAIT_RELEASE;
-                }
-            } else {
-                // Abort on any LOW
-                high_count = 0;
-                state = BTN_IDLE;
-            }
-            return true;
-
-        case BTN_WAIT_RELEASE:
-            if (!is_high) {
-                // Release detected after valid hold
-                state = BTN_IDLE;
-                high_count = 0;
-                return false;
-            }
-            return true;
+    if (!m_initial_release_seen) {
+        if (!is_high) {
+            m_initial_release_seen = true;
+        }
+        return false;
     }
 
-    return true; // fallback
+    return is_high;
 }
