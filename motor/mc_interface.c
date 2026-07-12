@@ -130,6 +130,8 @@ static volatile int m_sample_trigger;
 static volatile float m_last_adc_duration_sample;
 static volatile bool m_sample_is_second_motor;
 static volatile gnss_data m_gnss = {0};
+static volatile bool m_wheel_speed_override = false;
+static volatile float m_wheel_speed_override_value = 0.0;
 
 typedef struct {
 	bool is_second_motor;
@@ -1605,13 +1607,17 @@ float mc_interface_get_battery_level(float *wh_left) {
  * Speed, in m/s
  */
 float mc_interface_get_speed(void) {
+	if (m_wheel_speed_override) {
+		return m_wheel_speed_override_value;
+	} else {
 #ifdef HW_HAS_WHEEL_SPEED_SENSOR
-	return hw_get_speed();
+		return hw_get_speed();
 #else
-	const volatile mc_configuration *conf = mc_interface_get_configuration();
-	const float rpm = mc_interface_get_rpm() / (conf->si_motor_poles / 2.0);
-	return (rpm / 60.0) * conf->si_wheel_diameter * M_PI / conf->si_gear_ratio;
+		const volatile mc_configuration *conf = mc_interface_get_configuration();
+		const float rpm = mc_interface_get_rpm() / (conf->si_motor_poles / 2.0);
+		return (rpm / 60.0) * conf->si_wheel_diameter * M_PI / conf->si_gear_ratio;
 #endif
+	}
 }
 
 /**
@@ -1640,6 +1646,11 @@ float mc_interface_get_distance_abs(void) {
 	const float tacho_scale = (conf->si_wheel_diameter * M_PI) / (3.0 * conf->si_motor_poles * conf->si_gear_ratio);
 	return mc_interface_get_tachometer_abs_value(false) * tacho_scale;
 #endif
+}
+
+void mc_interface_override_wheel_speed(bool ovr, float speed) {
+	m_wheel_speed_override = ovr;
+	m_wheel_speed_override_value = speed;
 }
 
 setup_values mc_interface_get_setup_values(void) {
@@ -1747,6 +1758,8 @@ bool mc_interface_wait_for_motor_release_both(float timeout) {
 		mc_interface_select_motor_thread(motor_last);
 		return false;
 	}
+
+	mc_interface_select_motor_thread(motor_last);
 
 	return true;
 }
@@ -2205,12 +2218,15 @@ static void update_override_limits(volatile motor_if_state_t *motor, volatile mc
 
 	const float v_in = motor->m_input_voltage_filtered;
 	float rpm_now = 0.0;
+	float rpm_slow = 0.0; // Slow ERPM for fault codes
 
 	if (motor->m_conf.motor_type == MOTOR_TYPE_FOC) {
 		// Low latency is important for avoiding oscillations
 		rpm_now = DIR_MULT * mcpwm_foc_get_rpm_fast();
+		rpm_slow = DIR_MULT * mcpwm_foc_get_rpm();
 	} else {
 		rpm_now = mc_interface_get_rpm();
+		rpm_slow = rpm_now;
 	}
 
 	float rpm_abs = fabsf(rpm_now);
@@ -2394,6 +2410,18 @@ static void update_override_limits(volatile motor_if_state_t *motor, volatile mc
 		lo_min_rpm = 0.0;
 	} else {
 		lo_min_rpm = utils_map(rpm_now, rpm_neg_cut_start, rpm_neg_cut_end, l_current_max_tmp, 0.0);
+	}
+
+	// RPM Faults
+	if ((conf->l_additional_faults & (1 << 1)) && rpm_slow > conf->l_max_erpm) {
+		mc_interface_fault_stop(FAULT_CODE_OVERSPEED, !is_motor_1, false);
+	}
+	if ((conf->l_additional_faults & (1 << 2)) && rpm_slow < conf->l_min_erpm) {
+		mc_interface_fault_stop(FAULT_CODE_UNDERSPEED, !is_motor_1, false);
+	}
+	if ((conf->l_additional_faults & (1 << 3)) &&
+			fabsf(rpm_slow) > fabsf(utils_max_abs(conf->l_min_erpm, conf->l_max_erpm))) {
+		mc_interface_fault_stop(FAULT_CODE_ABS_OVERSPEED, !is_motor_1, false);
 	}
 
 	// Start Current Decrease
@@ -2653,7 +2681,16 @@ static void run_timer_tasks(volatile motor_if_state_t *motor) {
 
 	// Monitor currents balance. The sum of the 3 currents should be zero
 #ifdef HW_HAS_3_SHUNTS
-	if (motor->m_conf.foc_current_sample_mode != FOC_CURRENT_SAMPLE_MODE_HIGH_CURRENT  && dc_cal_done) { // This won't work when high current sampling is used
+
+#ifdef HW_HAS_PHASE_SHUNTS
+	bool too_high_duty_for_unbalance_check = false;
+#else
+	const float duty_now_abs = fabsf(mc_interface_get_duty_cycle_now());
+	bool too_high_duty_for_unbalance_check = duty_now_abs > 0.8;
+#endif
+
+	if (motor->m_conf.foc_current_sample_mode != FOC_CURRENT_SAMPLE_MODE_HIGH_CURRENT  &&
+			dc_cal_done && !too_high_duty_for_unbalance_check) {
 		motor->m_motor_current_unbalance = mc_interface_get_abs_motor_current_unbalance();
 
 		if (fabsf(motor->m_motor_current_unbalance) > fabsf(MCCONF_MAX_CURRENT_UNBALANCE)) {
