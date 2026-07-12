@@ -33,7 +33,16 @@ void timer_init(void) {
 	// Select the Counter Mode, UP (default)
 	// Set the Autoreload value
 	TIM5->ARR = 0xFFFFFFFF;
-	TIM5->PSC = ((SYSTEM_TIMER_CLOCK / 2) / TIMER_HZ) - 1;
+	// TIM5 is on APB1 (D2PPRE1). The F4 original divided SYSTEM_CORE_CLOCK (raw AHB
+	// clock) by 2 here, which happened to equal TIM5's real kernel clock only because
+	// F4's APB1 prescaler was /4 (AHB/4, then x2 timer-doubling = AHB/2). On this board,
+	// SYSTEM_TIMER_CLOCK is already the post-doubling TIM1 kernel clock (240MHz), and
+	// APB1/APB2 use the same /2 prescaler here, so TIM5's kernel clock equals
+	// SYSTEM_TIMER_CLOCK directly - the extra /2 was double-counting the F4-specific
+	// APB1/4 assumption and made TIM5 tick at ~2.14x the intended 14MHz, inflating every
+	// timer_seconds_elapsed_since()/timer_calc_diff() result (incl. real control-loop dt
+	// in the FOC PID/HFI threads) by the same ~2.14x.
+	TIM5->PSC = (SYSTEM_TIMER_CLOCK / TIMER_HZ) - 1;
 	TIM5->CNT = 0;
 	// Update
 	TIM5->EGR = TIM_EGR_UG;
