@@ -2926,6 +2926,9 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 
 
 	bool is_v7 = !(TIM1->CR1 & TIM_CR1_DIR);
+
+	FOC_PROFILE_BEGIN();
+
 	bool is_second_motor = false;
 	int norm_curr_ofs = 0;
 
@@ -3860,11 +3863,15 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 	palSetPad(AD2S1205_SAMPLE_GPIO, AD2S1205_SAMPLE_PIN);
 #endif
 
+	FOC_PROFILE_LINE();
+
 #ifdef HW_HAS_DUAL_MOTORS
 	mc_interface_mc_timer_isr(is_second_motor, dt);
 #else
 	mc_interface_mc_timer_isr(false, dt);
 #endif
+
+	FOC_PROFILE_LINE();
 
 	m_isr_motor = 0;
 	//PIN_TEST_OFF();
