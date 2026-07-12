@@ -156,6 +156,10 @@ static void prof_thd_wrapper(void *v) {
 }
 
 static bool pause_eval(uint32_t num_free, uint32_t timeout_ms) {
+	if (!lisp_thd_running) {
+		return false;
+	}
+
 	int timeout_cnt = timeout_ms;
 
 	if (num_free > 0) {
@@ -184,7 +188,6 @@ void lispif_process_cmd(unsigned char *data, unsigned int len,
 	case COMM_LISP_SET_RUNNING: {
 		bool ok = false;
 		bool running = data[0];
-		lispif_disable_all_events();
 
 		if (!running) {
 			ok = pause_eval(0, 2000);
@@ -206,13 +209,16 @@ void lispif_process_cmd(unsigned char *data, unsigned int len,
 		float mem_use = 0.0;
 
 		static systime_t time_last = 0;
+		utils_sys_lock_cnt();
 		if (eval_tp) {
 			cpu_use = 100.0 * (float)eval_tp->time / (float)(chVTGetSystemTimeX() - time_last);
 			time_last = chVTGetSystemTimeX();
 			eval_tp->time = 0;
 		} else {
+			utils_sys_unlock_cnt();
 			break;
 		}
+		utils_sys_unlock_cnt();
 
 		bool print_all = true;
 		if (len > 0) {
@@ -648,6 +654,24 @@ static void done_callback(eval_context_t *ctx) {
 		lbm_free(repl_buffer);
 		repl_buffer = 0;
 	}
+}
+
+void lispif_stop(void) {
+	if (!lisp_thd_running) {
+		return;
+	}
+
+	lispif_stop_lib();
+
+	lispif_lock_lbm();
+
+	lbm_kill_eval();
+	while (lisp_thd_running) {
+		lbm_kill_eval();
+		chThdSleepMilliseconds(1);
+	}
+
+	lispif_unlock_lbm();
 }
 
 bool lispif_restart(bool print, bool load_code, bool load_imports) {
