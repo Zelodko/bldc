@@ -1646,6 +1646,12 @@ void commands_process_packet(unsigned char *data, unsigned int len,
 		reply_func(send_buffer, ind);
 	} break;
 
+	case COMM_MOTOR_ESTOP: {
+		int32_t ind = 0;
+		mc_interface_ignore_input_both(buffer_get_uint16(data, &ind));
+		mc_interface_release_motor_override_both();
+	} break;
+
 	// Blocking commands. Only one of them runs at any given time, in their
 	// own thread. If other blocking commands come before the previous one has
 	// finished, they are discarded.
@@ -2251,9 +2257,12 @@ static THD_FUNCTION(blocking_thread, arg) {
 
 			float linkage, linkage_undriven, undriven_samples;
 			bool res;
+			float enc_offset, enc_ratio;
+			bool enc_inverted;
 			int fault = conf_general_measure_flux_linkage_openloop(current, duty,
 																   erpm_per_sec, resistance, inductance,
-																   &linkage, &linkage_undriven, &undriven_samples, &res);
+																   &linkage, &linkage_undriven, &undriven_samples, &res,
+																   &enc_offset, &enc_ratio, &enc_inverted);
 
 			if (fault != FAULT_CODE_NONE) {
 				linkage = 0.0;
@@ -2271,6 +2280,9 @@ static THD_FUNCTION(blocking_thread, arg) {
 			ind = 0;
 			send_buffer[ind++] = COMM_DETECT_MOTOR_FLUX_LINKAGE_OPENLOOP;
 			buffer_append_float32(send_buffer, linkage, 1e7, &ind);
+			buffer_append_float32(send_buffer, enc_offset, 1e6, &ind);
+			buffer_append_float32(send_buffer, enc_ratio, 1e6, &ind);
+			send_buffer[ind++] = enc_inverted;
 			if (send_func_blocking) {
 				send_func_blocking(send_buffer, ind);
 			}

@@ -45,6 +45,7 @@ int32_t confgenerator_serialize_mcconf(uint8_t *buffer, const mc_configuration *
 	buffer_append_float16(buffer, conf->l_current_max_scale, 10000, &ind);
 	buffer_append_float16(buffer, conf->l_current_min_scale, 10000, &ind);
 	buffer_append_float16(buffer, conf->l_duty_start, 10000, &ind);
+	buffer[ind++] = conf->l_additional_faults;
 	buffer_append_float32_auto(buffer, conf->sl_min_erpm, &ind);
 	buffer_append_float32_auto(buffer, conf->sl_min_erpm_cycle_int_limit, &ind);
 	buffer_append_float32_auto(buffer, conf->sl_max_fullbreak_current_dir_change, &ind);
@@ -84,8 +85,6 @@ int32_t confgenerator_serialize_mcconf(uint8_t *buffer, const mc_configuration *
 	buffer_append_float32_auto(buffer, conf->foc_start_curr_dec_rpm, &ind);
 	buffer_append_float32_auto(buffer, conf->foc_openloop_rpm, &ind);
 	buffer_append_float16(buffer, conf->foc_openloop_rpm_low, 1000, &ind);
-	buffer_append_float16(buffer, conf->foc_d_gain_scale_start, 1000, &ind);
-	buffer_append_float16(buffer, conf->foc_d_gain_scale_max_mod, 1000, &ind);
 	buffer_append_float16(buffer, conf->foc_sl_openloop_hyst, 100, &ind);
 	buffer_append_float16(buffer, conf->foc_sl_openloop_time_lock, 100, &ind);
 	buffer_append_float16(buffer, conf->foc_sl_openloop_time_ramp, 100, &ind);
@@ -122,6 +121,7 @@ int32_t confgenerator_serialize_mcconf(uint8_t *buffer, const mc_configuration *
 	buffer_append_float16(buffer, conf->foc_hfi_max_err, 1000, &ind);
 	buffer_append_float16(buffer, conf->foc_hfi_hyst, 100, &ind);
 	buffer_append_float32_auto(buffer, conf->foc_sl_erpm_hfi, &ind);
+	buffer_append_float32_auto(buffer, conf->foc_hfi_reset_erpm, &ind);
 	buffer_append_uint16(buffer, conf->foc_hfi_start_samples, &ind);
 	buffer_append_float32_auto(buffer, conf->foc_hfi_obs_ovr_sec, &ind);
 	buffer[ind++] = conf->foc_hfi_samples;
@@ -143,9 +143,11 @@ int32_t confgenerator_serialize_mcconf(uint8_t *buffer, const mc_configuration *
 	buffer_append_float16(buffer, conf->foc_fw_duty_start, 10000, &ind);
 	buffer_append_float16(buffer, conf->foc_fw_ramp_time, 1000, &ind);
 	buffer_append_float16(buffer, conf->foc_fw_q_current_factor, 10000, &ind);
+	buffer_append_float16(buffer, conf->foc_fw_backoff, 1000, &ind);
 	buffer[ind++] = conf->foc_speed_soure;
 	buffer[ind++] = conf->foc_short_ls_on_zero_duty;
 	buffer_append_float16(buffer, conf->foc_overmod_factor, 10000, &ind);
+	buffer_append_float16(buffer, conf->foc_mag_vd_max, 10000, &ind);
 	buffer[ind++] = conf->sp_pid_loop_rate;
 	buffer_append_float32_auto(buffer, conf->s_pid_kp, &ind);
 	buffer_append_float32_auto(buffer, conf->s_pid_ki, &ind);
@@ -295,6 +297,8 @@ int32_t confgenerator_serialize_appconf(uint8_t *buffer, const app_configuration
 	buffer[ind++] = conf->app_chuk_conf.use_smart_rev;
 	buffer_append_float32_auto(buffer, conf->app_chuk_conf.smart_rev_max_duty, &ind);
 	buffer_append_float32_auto(buffer, conf->app_chuk_conf.smart_rev_ramp_time, &ind);
+	buffer_append_float16(buffer, conf->app_chuk_conf.coast_brake_level, 1000, &ind);
+	buffer_append_float32_auto(buffer, conf->app_chuk_conf.coast_brake_ramp_time, &ind);
 	buffer[ind++] = conf->app_nrf_conf.speed;
 	buffer[ind++] = conf->app_nrf_conf.power;
 	buffer[ind++] = conf->app_nrf_conf.crc_type;
@@ -385,6 +389,7 @@ bool confgenerator_deserialize_mcconf(const uint8_t *buffer, mc_configuration *c
 	conf->l_current_max_scale = buffer_get_float16(buffer, 10000, &ind);
 	conf->l_current_min_scale = buffer_get_float16(buffer, 10000, &ind);
 	conf->l_duty_start = buffer_get_float16(buffer, 10000, &ind);
+	conf->l_additional_faults = buffer[ind++];
 	conf->sl_min_erpm = buffer_get_float32_auto(buffer, &ind);
 	conf->sl_min_erpm_cycle_int_limit = buffer_get_float32_auto(buffer, &ind);
 	conf->sl_max_fullbreak_current_dir_change = buffer_get_float32_auto(buffer, &ind);
@@ -424,8 +429,6 @@ bool confgenerator_deserialize_mcconf(const uint8_t *buffer, mc_configuration *c
 	conf->foc_start_curr_dec_rpm = buffer_get_float32_auto(buffer, &ind);
 	conf->foc_openloop_rpm = buffer_get_float32_auto(buffer, &ind);
 	conf->foc_openloop_rpm_low = buffer_get_float16(buffer, 1000, &ind);
-	conf->foc_d_gain_scale_start = buffer_get_float16(buffer, 1000, &ind);
-	conf->foc_d_gain_scale_max_mod = buffer_get_float16(buffer, 1000, &ind);
 	conf->foc_sl_openloop_hyst = buffer_get_float16(buffer, 100, &ind);
 	conf->foc_sl_openloop_time_lock = buffer_get_float16(buffer, 100, &ind);
 	conf->foc_sl_openloop_time_ramp = buffer_get_float16(buffer, 100, &ind);
@@ -462,6 +465,7 @@ bool confgenerator_deserialize_mcconf(const uint8_t *buffer, mc_configuration *c
 	conf->foc_hfi_max_err = buffer_get_float16(buffer, 1000, &ind);
 	conf->foc_hfi_hyst = buffer_get_float16(buffer, 100, &ind);
 	conf->foc_sl_erpm_hfi = buffer_get_float32_auto(buffer, &ind);
+	conf->foc_hfi_reset_erpm = buffer_get_float32_auto(buffer, &ind);
 	conf->foc_hfi_start_samples = buffer_get_uint16(buffer, &ind);
 	conf->foc_hfi_obs_ovr_sec = buffer_get_float32_auto(buffer, &ind);
 	conf->foc_hfi_samples = buffer[ind++];
@@ -483,9 +487,11 @@ bool confgenerator_deserialize_mcconf(const uint8_t *buffer, mc_configuration *c
 	conf->foc_fw_duty_start = buffer_get_float16(buffer, 10000, &ind);
 	conf->foc_fw_ramp_time = buffer_get_float16(buffer, 1000, &ind);
 	conf->foc_fw_q_current_factor = buffer_get_float16(buffer, 10000, &ind);
+	conf->foc_fw_backoff = buffer_get_float16(buffer, 1000, &ind);
 	conf->foc_speed_soure = buffer[ind++];
 	conf->foc_short_ls_on_zero_duty = buffer[ind++];
 	conf->foc_overmod_factor = buffer_get_float16(buffer, 10000, &ind);
+	conf->foc_mag_vd_max = buffer_get_float16(buffer, 10000, &ind);
 	conf->sp_pid_loop_rate = buffer[ind++];
 	conf->s_pid_kp = buffer_get_float32_auto(buffer, &ind);
 	conf->s_pid_ki = buffer_get_float32_auto(buffer, &ind);
@@ -638,6 +644,8 @@ bool confgenerator_deserialize_appconf(const uint8_t *buffer, app_configuration 
 	conf->app_chuk_conf.use_smart_rev = buffer[ind++];
 	conf->app_chuk_conf.smart_rev_max_duty = buffer_get_float32_auto(buffer, &ind);
 	conf->app_chuk_conf.smart_rev_ramp_time = buffer_get_float32_auto(buffer, &ind);
+	conf->app_chuk_conf.coast_brake_level = buffer_get_float16(buffer, 1000, &ind);
+	conf->app_chuk_conf.coast_brake_ramp_time = buffer_get_float32_auto(buffer, &ind);
 	conf->app_nrf_conf.speed = buffer[ind++];
 	conf->app_nrf_conf.power = buffer[ind++];
 	conf->app_nrf_conf.crc_type = buffer[ind++];
@@ -721,6 +729,7 @@ void confgenerator_set_defaults_mcconf(mc_configuration *conf) {
 	conf->l_current_max_scale = MCCONF_L_CURRENT_MAX_SCALE;
 	conf->l_current_min_scale = MCCONF_L_CURRENT_MIN_SCALE;
 	conf->l_duty_start = MCCONF_L_DUTY_START;
+	conf->l_additional_faults = MCCONF_L_ADDITIONAL_FAULTS;
 	conf->sl_min_erpm = MCCONF_SL_MIN_RPM;
 	conf->sl_min_erpm_cycle_int_limit = MCCONF_SL_MIN_ERPM_CYCLE_INT_LIMIT;
 	conf->sl_max_fullbreak_current_dir_change = MCCONF_SL_MAX_FB_CURR_DIR_CHANGE;
@@ -760,8 +769,6 @@ void confgenerator_set_defaults_mcconf(mc_configuration *conf) {
 	conf->foc_start_curr_dec_rpm = MCCONF_FOC_START_CURR_DEC_RPM;
 	conf->foc_openloop_rpm = MCCONF_FOC_OPENLOOP_RPM;
 	conf->foc_openloop_rpm_low = MCCONF_FOC_OPENLOOP_RPM_LOW;
-	conf->foc_d_gain_scale_start = MCCONF_FOC_D_GAIN_SCALE_START;
-	conf->foc_d_gain_scale_max_mod = MCCONF_FOC_D_GAIN_SCALE_MAX_MOD;
 	conf->foc_sl_openloop_hyst = MCCONF_FOC_SL_OPENLOOP_HYST;
 	conf->foc_sl_openloop_time_lock = MCCONF_FOC_SL_OPENLOOP_T_LOCK;
 	conf->foc_sl_openloop_time_ramp = MCCONF_FOC_SL_OPENLOOP_T_RAMP;
@@ -798,6 +805,7 @@ void confgenerator_set_defaults_mcconf(mc_configuration *conf) {
 	conf->foc_hfi_max_err = MCCONF_FOC_HFI_MAX_ERR;
 	conf->foc_hfi_hyst = MCCONF_FOC_HFI_HYST;
 	conf->foc_sl_erpm_hfi = MCCONF_FOC_SL_ERPM_HFI;
+	conf->foc_hfi_reset_erpm = MCCONF_FOC_HFI_RESET_ERPM;
 	conf->foc_hfi_start_samples = MCCONF_FOC_HFI_START_SAMPLES;
 	conf->foc_hfi_obs_ovr_sec = MCCONF_FOC_HFI_OBS_OVR_SEC;
 	conf->foc_hfi_samples = MCCONF_FOC_HFI_SAMPLES;
@@ -819,9 +827,11 @@ void confgenerator_set_defaults_mcconf(mc_configuration *conf) {
 	conf->foc_fw_duty_start = MCCONF_FOC_FW_DUTY_START;
 	conf->foc_fw_ramp_time = MCCONF_FOC_FW_RAMP_TIME;
 	conf->foc_fw_q_current_factor = MCCONF_FOC_FW_Q_CURRENT_FACTOR;
+	conf->foc_fw_backoff = MCCONF_FOC_FW_BACKOFF;
 	conf->foc_speed_soure = MCCONF_FOC_SPEED_SOURCE;
 	conf->foc_short_ls_on_zero_duty = MCCONF_FOC_SHORT_LS_ON_ZERO_DUTY;
 	conf->foc_overmod_factor = MCCONF_FOC_OVERMOD_FACTOR;
+	conf->foc_mag_vd_max = MCCONF_FOC_MAG_VD_MAX;
 	conf->sp_pid_loop_rate = MCCONF_SP_PID_LOOP_RATE;
 	conf->s_pid_kp = MCCONF_S_PID_KP;
 	conf->s_pid_ki = MCCONF_S_PID_KI;
@@ -965,6 +975,8 @@ void confgenerator_set_defaults_appconf(app_configuration *conf) {
 	conf->app_chuk_conf.use_smart_rev = APPCONF_CHUK_USE_SMART_REV;
 	conf->app_chuk_conf.smart_rev_max_duty = APPCONF_CHUK_SMART_REV_MAX_DUTY;
 	conf->app_chuk_conf.smart_rev_ramp_time = APPCONF_CHUK_SMART_REV_RAMP_TIME;
+	conf->app_chuk_conf.coast_brake_level = APPCONF_CHUK_COAST_BRAKE_LEVEL;
+	conf->app_chuk_conf.coast_brake_ramp_time = APPCONF_CHUK_COAST_BRAKE_RAMP_TIME;
 	conf->app_nrf_conf.speed = APPCONF_NRF_SPEED;
 	conf->app_nrf_conf.power = APPCONF_NRF_POWER;
 	conf->app_nrf_conf.crc_type = APPCONF_NRF_CRC;

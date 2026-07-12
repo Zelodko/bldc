@@ -4993,10 +4993,13 @@ static void measure_lambda_enc_task(void *arg) {
 
 		float linkage = 0.0, linkage_undriven = 0.0, undriven_samples = 0.0;
 		bool result;
+		float enc_offset, enc_ratio;
+		bool enc_inverted;
 
 		int fault = conf_general_measure_flux_linkage_openloop(
 				a->current, a->duty, a->erpm_per_sec, a->resistance, a->inductance,
-				&linkage, &linkage_undriven, &undriven_samples, &result);
+				&linkage, &linkage_undriven, &undriven_samples, &result,
+				&enc_offset, &enc_ratio, &enc_inverted);
 
 		mc_interface_select_motor_thread(1);
 
@@ -5015,6 +5018,12 @@ static void measure_lambda_enc_task(void *arg) {
 			f_float(&v, linkage_undriven);	// +5
 			f_cons(&v);						// +1
 			f_float(&v, undriven_samples);	// +5
+			f_cons(&v);						// +1
+			f_float(&v, enc_offset);		// +5
+			f_cons(&v);						// +1
+			f_float(&v, enc_ratio);			// +5
+			f_cons(&v);						// +1
+			f_i(&v, enc_inverted);			// +5
 			f_sym(&v, SYM_NIL);				// +1
 		}
 

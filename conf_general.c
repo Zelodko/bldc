@@ -124,11 +124,26 @@ void conf_general_init(void) {
 		if (g_backup.hw_config_init_flag == BACKUP_VAR_INIT_CODE) {
 			memcpy((void*)backup_tmp.hw_config, (uint8_t*)g_backup.hw_config, sizeof(g_backup.hw_config));
 		}
+
+		if (g_backup.enc_corr_init_flag == BACKUP_VAR_INIT_CODE) {
+			memcpy((void*)backup_tmp.enc_corr, (uint8_t*)g_backup.enc_corr, sizeof(g_backup.enc_corr));
+			backup_tmp.enc_corr_en = g_backup.enc_corr_en;
+		}
+
+		if (g_backup.can_init_flag == BACKUP_VAR_INIT_CODE) {
+			backup_tmp.can_baud = g_backup.can_baud;
+			backup_tmp.can_id = g_backup.can_id;
+		} else {
+			backup_tmp.can_baud = APPCONF_CAN_BAUD_RATE;
+			backup_tmp.can_id = HW_DEFAULT_ID;
+		}
 	}
 
 	backup_tmp.odometer_init_flag = BACKUP_VAR_INIT_CODE;
 	backup_tmp.runtime_init_flag = BACKUP_VAR_INIT_CODE;
 	backup_tmp.hw_config_init_flag = BACKUP_VAR_INIT_CODE;
+	backup_tmp.enc_corr_init_flag = BACKUP_VAR_INIT_CODE;
+	backup_tmp.can_init_flag = BACKUP_VAR_INIT_CODE;
 
 	g_backup = backup_tmp;
 	conf_general_store_backup_data();
@@ -142,6 +157,14 @@ void conf_general_init(void) {
  * app config to get lost.
  */
 bool conf_general_store_backup_data(void) {
+	mc_interface_ignore_input_both(5000);
+	mc_interface_release_motor_override_both();
+
+	if (!mc_interface_wait_for_motor_release_both(3.0)) {
+		return false;
+	}
+
+	utils_sys_lock_cnt();
 	timeout_configure_IWDT_slowest();
 
 	bool is_ok = true;
@@ -163,6 +186,8 @@ bool conf_general_store_backup_data(void) {
 	HAL_FLASH_Lock();
 
 	timeout_configure_IWDT();
+	mc_interface_ignore_input_both(100);
+	utils_sys_unlock_cnt();
 
 	return is_ok;
 }
@@ -265,6 +290,14 @@ static bool store_eeprom_var(eeprom_var *v, int address, uint16_t base) {
 	var0 = v->as_u32 >> 16;
 	var1 = v->as_u32 & 0xFFFF;
 
+	mc_interface_ignore_input_both(5000);
+	mc_interface_release_motor_override_both();
+
+	if (!mc_interface_wait_for_motor_release_both(3.0)) {
+		return false;
+	}
+
+	utils_sys_lock_cnt();
 	timeout_configure_IWDT_slowest();
 
 	HAL_FLASH_Unlock();
@@ -282,6 +315,8 @@ static bool store_eeprom_var(eeprom_var *v, int address, uint16_t base) {
 	HAL_FLASH_Lock();
 
 	timeout_configure_IWDT();
+	mc_interface_ignore_input_both(100);
+	utils_sys_unlock_cnt();
 
 	return is_ok;
 }
@@ -332,32 +367,14 @@ void conf_general_read_app_configuration(app_configuration *conf) {
  * A pointer to the configuration that should be stored.
  */
 bool conf_general_store_app_configuration(app_configuration *conf) {
-	int motor_old = mc_interface_get_motor_thread();
+	mc_interface_ignore_input_both(5000);
+	mc_interface_release_motor_override_both();
 
-	mc_interface_select_motor_thread(1);
-	mc_interface_unlock();
-	mc_interface_release_motor();
-	mc_interface_lock();
-
-	if (!mc_interface_wait_for_motor_release(2.0)) {
-		mc_interface_unlock();
-		mc_interface_select_motor_thread(motor_old);
-		return false;
-	}
-
-	mc_interface_select_motor_thread(2);
-	mc_interface_unlock();
-	mc_interface_release_motor();
-	mc_interface_lock();
-
-	if (!mc_interface_wait_for_motor_release(2.0)) {
-		mc_interface_unlock();
-		mc_interface_select_motor_thread(motor_old);
+	if (!mc_interface_wait_for_motor_release_both(3.0)) {
 		return false;
 	}
 
 	utils_sys_lock_cnt();
-
 	timeout_configure_IWDT_slowest();
 
 	bool is_ok = true;
@@ -381,17 +398,12 @@ bool conf_general_store_app_configuration(app_configuration *conf) {
 	HAL_FLASH_Lock();
 
 	timeout_configure_IWDT();
-
-	chThdSleepMilliseconds(100);
-
-	mc_interface_select_motor_thread(1);
-	mc_interface_unlock();
-	mc_interface_select_motor_thread(2);
-	mc_interface_unlock();
-
+	mc_interface_ignore_input_both(100);
 	utils_sys_unlock_cnt();
 
-	mc_interface_select_motor_thread(motor_old);
+	g_backup.can_id = conf->controller_id;
+	g_backup.can_baud = conf->can_baud_rate;
+	conf_general_store_backup_data();
 
 	return is_ok;
 }
@@ -442,32 +454,14 @@ void conf_general_read_mc_configuration(mc_configuration *conf, bool is_motor_2)
  * A pointer to the configuration that should be stored.
  */
 bool conf_general_store_mc_configuration(mc_configuration *conf, bool is_motor_2) {
-	int motor_old = mc_interface_get_motor_thread();
+	mc_interface_ignore_input_both(5000);
+	mc_interface_release_motor_override_both();
 
-	mc_interface_select_motor_thread(1);
-	mc_interface_unlock();
-	mc_interface_release_motor();
-	mc_interface_lock();
-
-	if (!mc_interface_wait_for_motor_release(2.0)) {
-		mc_interface_unlock();
-		mc_interface_select_motor_thread(motor_old);
-		return false;
-	}
-
-	mc_interface_select_motor_thread(2);
-	mc_interface_unlock();
-	mc_interface_release_motor();
-	mc_interface_lock();
-
-	if (!mc_interface_wait_for_motor_release(2.0)) {
-		mc_interface_unlock();
-		mc_interface_select_motor_thread(motor_old);
+	if (!mc_interface_wait_for_motor_release_both(3.0)) {
 		return false;
 	}
 
 	utils_sys_lock_cnt();
-
 	timeout_configure_IWDT_slowest();
 
 	bool is_ok = true;
@@ -491,17 +485,8 @@ bool conf_general_store_mc_configuration(mc_configuration *conf, bool is_motor_2
 	HAL_FLASH_Lock();
 
 	timeout_configure_IWDT();
-
-	chThdSleepMilliseconds(100);
-
-	mc_interface_select_motor_thread(1);
-	mc_interface_unlock();
-	mc_interface_select_motor_thread(2);
-	mc_interface_unlock();
-
+	mc_interface_ignore_input_both(100);
 	utils_sys_unlock_cnt();
-
-	mc_interface_select_motor_thread(motor_old);
 
 	return is_ok;
 }
@@ -961,10 +946,21 @@ uint8_t conf_general_calculate_deadtime(float deadtime_ns, float core_clock_freq
  */
 int conf_general_measure_flux_linkage_openloop(float current, float duty,
 		float erpm_per_sec, float res, float ind, float *linkage,
-		float *linkage_undriven, float *undriven_samples, bool *result) {
+		float *linkage_undriven, float *undriven_samples, bool *result,
+		float *enc_offset, float *enc_ratio, bool *enc_inverted) {
 
 	*result = false;
 	int fault = FAULT_CODE_NONE;
+
+	if (enc_offset) {
+		*enc_offset = -1;
+	}
+	if (enc_ratio) {
+		*enc_ratio = -1;
+	}
+	if (enc_inverted) {
+		*enc_inverted = false;
+	}
 
 	// Allow using old values when only measuring the flux linkage undriven
 	if (fabsf(current) <= mc_interface_get_configuration()->cc_min_current) {
@@ -1001,6 +997,7 @@ int conf_general_measure_flux_linkage_openloop(float current, float duty,
 	mcconf->foc_current_kp = kp;
 	mcconf->foc_current_ki = ki;
 	mcconf->foc_cc_decoupling = FOC_CC_DECOUPLING_DISABLED;
+	mcconf->m_encoder_sincos_filter_constant = 1.0;
 	mc_interface_set_configuration(mcconf);
 
 	// Wait maximum 5s for fault code to disappear
@@ -1182,6 +1179,15 @@ int conf_general_measure_flux_linkage_openloop(float current, float duty,
 		*linkage = 0.0;
 	}
 
+	float enc_diff_sin = 0.0;
+	float enc_diff_cos = 0.0;
+	float enc_val_last = encoder_read_deg();
+	float phase_val_last = mcpwm_foc_get_phase_observer();
+	float enc_ratio_sum = 0.0;
+	float enc_samples = 0.0;
+	float enc_travel = 0.0;
+	bool enc_res_set = false;
+
 	float linkage_sum = 0.0;
 	float linkage_samples = 0.0;
 	if (fault == FAULT_CODE_NONE) {
@@ -1193,6 +1199,8 @@ int conf_general_measure_flux_linkage_openloop(float current, float duty,
 
 			linkage_sum += mcpwm_foc_get_vq() / rad_s_now;
 
+			float phase_bemf = mcpwm_foc_get_phase_bemf();
+
 			// Optionally use magnitude
 			//              linkage_sum += sqrtf(SQ(mcpwm_foc_get_vq()) + SQ(mcpwm_foc_get_vd())) / rad_s_now;
 
@@ -1200,6 +1208,52 @@ int conf_general_measure_flux_linkage_openloop(float current, float duty,
 			//              float x1, x2;
 			//              mcpwm_foc_get_observer_state(&x1, &x2);
 			//              linkage_sum += sqrtf(SQ(x1) + SQ(x2));
+
+			float diff_encoder = utils_angle_difference(encoder_read_deg(), enc_val_last);
+
+			if (fabsf(diff_encoder) >= 5.0) {
+				float diff_observer = utils_angle_difference(phase_bemf, phase_val_last);
+
+				enc_val_last = encoder_read_deg();
+				phase_val_last = phase_bemf;
+
+				enc_ratio_sum += diff_observer / diff_encoder;
+				enc_samples += 1.0;
+				enc_travel += fabsf(diff_encoder);
+			}
+
+			const float travel_for_ratio = 40.0;
+
+			if (enc_travel >= travel_for_ratio) {
+				float ratio = roundf(SIGN(enc_ratio_sum) * enc_ratio_sum / enc_samples);
+				bool inverted = enc_ratio_sum < 0.0;
+
+				float phase_tmp = encoder_read_deg();
+				if (inverted) {
+					phase_tmp = 360.0 - phase_tmp;
+				}
+				phase_tmp *= ratio;
+
+				float s, c;
+				sincosf(DEG2RAD_f(utils_angle_difference(phase_tmp, phase_bemf)), &s, &c);
+				enc_diff_sin += s;
+				enc_diff_cos += c;
+
+				if (enc_travel >= (360.0 + travel_for_ratio) && !enc_res_set) {
+					if (enc_offset) {
+						*enc_offset = RAD2DEG_f(atan2f(enc_diff_sin, enc_diff_cos));
+						utils_norm_angle(enc_offset);
+					}
+					if (enc_ratio) {
+						*enc_ratio = ratio;
+					}
+					if (enc_inverted) {
+						*enc_inverted = inverted;
+					}
+
+					enc_res_set = true;
+				}
+			}
 
 			linkage_samples += 1.0;
 			chThdSleep(1);
@@ -1605,7 +1659,8 @@ static void measure_flux_linkage_task(void *arg) {
 				&linkage,
 				&linkage_undriven,
 				&undriven_samples,
-				&args->result);
+				&args->result,
+				0, 0, 0);
 
 	if (undriven_samples > 60) {
 		args->linkage = linkage_undriven;
@@ -1842,8 +1897,11 @@ int conf_general_detect_apply_all_foc(float max_power_loss,
 	float lambda_undriven = 0.0;
 	float lambda_undriven_samples = 0.0;
 	bool res;
+	float enc_offset = 0.0, enc_ratio = 0.0;
+	bool enc_inverted = false;
 	faultM1 = conf_general_measure_flux_linkage_openloop(i_max / 2.5, 0.3, 1800, r, l,
-														 &lambda, &lambda_undriven, &lambda_undriven_samples, &res);
+														 &lambda, &lambda_undriven, &lambda_undriven_samples, &res,
+														 &enc_offset, &enc_ratio, &enc_inverted);
 
 	if (lambda_undriven_samples > 60) {
 		lambda = lambda_undriven;
@@ -1896,6 +1954,12 @@ int conf_general_detect_apply_all_foc(float max_power_loss,
 		mcconf_old->foc_motor_l = l;
 		mcconf_old->foc_motor_ld_lq_diff = ld_lq_diff;
 		mcconf_old->foc_motor_flux_linkage = lambda;
+
+		if (enc_offset >= 0.0 && enc_ratio >= 0.0) {
+			mcconf_old->foc_encoder_offset = enc_offset;
+			mcconf_old->foc_encoder_ratio = enc_ratio;
+			mcconf_old->foc_encoder_inverted = enc_inverted;
+		}
 
 		if (mc_interface_temp_motor_filtered() > -10) {
 			mcconf_old->foc_temp_comp_base_temp = mc_interface_temp_motor_filtered();

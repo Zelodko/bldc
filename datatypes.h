@@ -77,7 +77,8 @@ typedef enum {
 typedef enum {
 	FOC_CURRENT_SAMPLE_MODE_LONGEST_ZERO = 0,
 	FOC_CURRENT_SAMPLE_MODE_ALL_SENSORS,
-	FOC_CURRENT_SAMPLE_MODE_HIGH_CURRENT
+	FOC_CURRENT_SAMPLE_MODE_HIGH_CURRENT,
+	FOC_CURRENT_SAMPLE_MODE_BEST_SENSOR // Experimental, not used!
 } mc_foc_current_sample_mode;
 
 // Auxiliary output mode
@@ -171,6 +172,10 @@ typedef enum {
 	FAULT_CODE_PHASE_FILTER,
 	FAULT_CODE_ENCODER_FAULT,
 	FAULT_CODE_LV_OUTPUT_FAULT,
+	FAULT_CODE_ENCODER_SLIP,
+	FAULT_CODE_OVERSPEED,
+	FAULT_CODE_UNDERSPEED,
+	FAULT_CODE_ABS_OVERSPEED
 } mc_fault_code;
 
 typedef enum {
@@ -418,6 +423,7 @@ typedef struct {
 	float l_current_max_scale;
 	float l_current_min_scale;
 	float l_duty_start;
+	uint8_t l_additional_faults;
 	// Overridden limits (Computed during runtime)
 	float lo_current_max;
 	float lo_current_min;
@@ -465,8 +471,6 @@ typedef struct {
 	float foc_start_curr_dec_rpm;
 	float foc_openloop_rpm;
 	float foc_openloop_rpm_low;
-	float foc_d_gain_scale_start;
-	float foc_d_gain_scale_max_mod;
 	float foc_sl_openloop_hyst;
 	float foc_sl_openloop_time;
 	float foc_sl_openloop_time_lock;
@@ -497,6 +501,7 @@ typedef struct {
 	float foc_hfi_max_err;
 	float foc_hfi_hyst;
 	float foc_sl_erpm_hfi;
+	float foc_hfi_reset_erpm;
 	uint16_t foc_hfi_start_samples;
 	float foc_hfi_obs_ovr_sec;
 	foc_hfi_samples foc_hfi_samples;
@@ -513,9 +518,11 @@ typedef struct {
 	float foc_fw_duty_start;
 	float foc_fw_ramp_time;
 	float foc_fw_q_current_factor;
+	float foc_fw_backoff;
 	FOC_SPEED_SRC foc_speed_soure;
 	bool foc_short_ls_on_zero_duty;
 	float foc_overmod_factor;
+	float foc_mag_vd_max;
 
 	PID_RATE sp_pid_loop_rate;
 
@@ -734,6 +741,8 @@ typedef struct {
 	bool use_smart_rev;
 	float smart_rev_max_duty;
 	float smart_rev_ramp_time;
+	float coast_brake_level;
+	float coast_brake_ramp_time;
 } chuk_config;
 
 typedef struct {
@@ -1129,6 +1138,8 @@ typedef enum {
 	COMM_FW_INFO							= 157,
 
 	COMM_CAN_UPDATE_BAUD_ALL				= 158,
+
+	COMM_MOTOR_ESTOP						= 159,
 } COMM_PACKET_ID;
 
 // CAN commands
@@ -1442,6 +1453,18 @@ typedef struct __attribute__((packed)) {
 	// HW-specific data
 	uint32_t hw_config_init_flag;
 	uint8_t hw_config[128];
+
+	// Encoder correction table
+	uint32_t enc_corr_init_flag;
+	int8_t enc_corr_en;
+	int8_t enc_corr[360];
+
+	// CAN settings
+	uint32_t can_init_flag;
+	uint8_t can_baud;
+	uint8_t can_id;
+
+	uint8_t dummy;
 } backup_data;
 
 #endif /* DATATYPES_H_ */
