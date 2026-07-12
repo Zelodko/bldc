@@ -60,6 +60,7 @@
 #include "mempools.h"
 #include "events.h"
 #include "main.h"
+#include "mcpwm_common.h"
 
 #ifdef CAN_ENABLE
 #include "comm_can.h"
@@ -369,6 +370,34 @@ int main(void) {
 	for(;;) {
 		chThdSleepMilliseconds(10);
 	}
+}
+
+// Force all PWM outputs off and reset the MCU. Called from fault handlers
+// (NMI/HardFault/MemManage/BusFault/UsageFault) and the ChibiOS system halt
+// hook so a frozen or crashed CPU can never leave the gate driver outputting
+// whatever it last had.
+void main_stop_motor_and_reset(void) {
+	TIMER_UPDATE_CH1_0();
+	TIMER_UPDATE_CH2_0();
+	TIMER_UPDATE_CH3_0();
+	TIMER_CONTROL_UPDATE();
+
+#ifdef HW_HAS_DRV8313
+	DISABLE_BR();
+#endif
+
+#ifdef HW_HAS_DUAL_MOTORS
+	TIMER_UPDATE_M2_CH1_0();
+	TIMER_UPDATE_M2_CH2_0();
+	TIMER_UPDATE_M2_CH3_0();
+	TIMER_M2_CONTROL_UPDATE();
+
+#ifdef HW_HAS_DRV8313_2
+	ENABLE_BR_2();
+#endif
+#endif
+
+	NVIC_SystemReset();
 }
 
 //#pragma GCC pop_options

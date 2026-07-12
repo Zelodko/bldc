@@ -24,6 +24,7 @@
 #include "mcpwm_foc.h"
 #include "hw.h"
 #include "encoder/encoder.h"
+#include "main.h"
 
 __attribute__((section(".itcm_text")))
 CH_IRQ_HANDLER(ADC1_2_3_IRQHandler) {
@@ -44,4 +45,24 @@ CH_IRQ_HANDLER(TIM2_IRQHandler) {
 	}
 	// Clear the IT pending bit
 	TIM2->SR = ~TIM_SR_CC2IF;
+}
+
+CH_IRQ_HANDLER(NMI_Handler) {
+	main_stop_motor_and_reset();
+}
+
+CH_IRQ_HANDLER(HardFault_Handler) {
+	main_stop_motor_and_reset();
+}
+
+CH_IRQ_HANDLER(MemManage_Handler) {
+	main_stop_motor_and_reset();
+}
+
+CH_IRQ_HANDLER(BusFault_Handler) {
+	main_stop_motor_and_reset();
+}
+
+CH_IRQ_HANDLER(UsageFault_Handler) {
+	main_stop_motor_and_reset();
 }
