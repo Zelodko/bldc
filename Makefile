@@ -180,7 +180,7 @@ fw_$(1)_vescfw:
 		TCHAIN_PREFIX="$(ARM_SDK_PREFIX)" \
 		BUILDDIR="$(2)" \
 		PROJECT="$(3)" \
-		build_args='$$($(1)_BUILD_MACROS)' USE_VERBOSE_COMPILE=no
+		build_args='$$($(1)_BUILD_MACROS)' USE_VERBOSE_COMPILE=$(if $(V),yes,no)
 
 $(1)_flash: fw_$(1)_flash
 fw_$(1)_flash: fw_$(1)_vescfw fw_$(1)_flash_only
