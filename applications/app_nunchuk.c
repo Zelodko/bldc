@@ -347,20 +347,37 @@ static THD_FUNCTION(output_thread, arg) {
 		was_pid = false;
 
 		float current = 0;
+		bool coast_brake = false;
+		static bool coast_brake_prev = false;
+		float coast_brake_current = fabsf(config.coast_brake_level * mcconf->lo_current_min);
 
-		if (config.ctrl_type == CHUK_CTRL_TYPE_CURRENT_BIDIRECTIONAL) {
-			if ((out_val > 0.0 && duty_now > 0.0) || (out_val < 0.0 && duty_now < 0.0)) {
-				current = out_val * mcconf->lo_current_max;
-			} else {
-				current = out_val * fabsf(mcconf->lo_current_min);
-			}
+		if (fabsf(out_val) < 0.01 && config.coast_brake_level > 0.005 &&
+				(fabsf(prev_current) < coast_brake_current || coast_brake_prev)) {
+			current = -coast_brake_current;
+			coast_brake = true;
 		} else {
-			if (out_val >= 0.0 && ((is_reverse ? -1.0 : 1.0) * duty_now) > 0.0) {
-				current = out_val * mcconf->lo_current_max;
+			if (config.ctrl_type == CHUK_CTRL_TYPE_CURRENT_BIDIRECTIONAL) {
+				if ((out_val > 0.0 && duty_now > 0.0) || (out_val < 0.0 && duty_now < 0.0)) {
+					current = out_val * mcconf->lo_current_max;
+				} else {
+					current = out_val * fabsf(mcconf->lo_current_min);
+				}
 			} else {
-				current = out_val * fabsf(mcconf->lo_current_min);
+				if (out_val >= 0.0 && ((is_reverse ? -1.0 : 1.0) * duty_now) > 0.0) {
+					current = out_val * mcconf->lo_current_max;
+				} else {
+					current = out_val * fabsf(mcconf->lo_current_min);
+				}
 			}
 		}
+
+		// When leaving coast brake mode set the previous current
+		// to the actual current to not get a spike in bidirectional mode
+		// close to standstill.
+		if (coast_brake_prev && !coast_brake) {
+			prev_current = current_now;
+		}
+		coast_brake_prev = coast_brake;
 
 		// Find lowest RPM and highest current
 		float rpm_local = fabsf(mc_interface_get_rpm());
@@ -442,6 +459,10 @@ static THD_FUNCTION(output_thread, arg) {
 				fabsf(mcconf->l_current_min) * mcconf->l_current_min_scale;
 		float ramp_time = fabsf(current) > fabsf(prev_current) ? config.ramp_time_pos : config.ramp_time_neg;
 
+		if (coast_brake) {
+			ramp_time = config.coast_brake_ramp_time;
+		}
+
 		if (ramp_time > 0.01) {
 			const float ramp_step = ((float)OUTPUT_ITERATION_TIME_MS * current_range) / (ramp_time * 1000.0);
 
@@ -474,7 +495,8 @@ static THD_FUNCTION(output_thread, arg) {
 
 		prev_current = current;
 
-		if (current < 0.0 && config.ctrl_type != CHUK_CTRL_TYPE_CURRENT_BIDIRECTIONAL) {
+		if (current < 0.0 &&
+				(config.ctrl_type != CHUK_CTRL_TYPE_CURRENT_BIDIRECTIONAL || coast_brake)) {
 			mc_interface_set_brake_current(current);
 
 			// Send brake command to all ESCs seen recently on the CAN bus

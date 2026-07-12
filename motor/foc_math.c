@@ -723,10 +723,20 @@ void foc_run_fw(motor_all_state_t *motor, float dt) {
 
 		if (motor->m_conf->foc_fw_duty_start < 0.99 &&
 				duty_abs > motor->m_conf->foc_fw_duty_start * motor->m_conf->l_max_duty) {
+			float i_fw_max = motor->m_conf->foc_fw_current_max;
+
+			if (motor->m_conf->foc_fw_backoff > 0.001) {
+				float i_err_backoff = SIGN(motor->m_speed_est_fast) *
+						(motor->m_motor_state.iq - motor->m_motor_state.iq_target) / i_fw_max;
+				i_err_backoff *= motor->m_conf->foc_fw_backoff;
+				utils_truncate_number(&i_err_backoff, 0.0, 1.0);
+				i_fw_max *= (1.0 - i_err_backoff);
+			}
+
 			fw_current_now = utils_map(duty_abs,
 					motor->m_conf->foc_fw_duty_start * motor->m_conf->l_max_duty,
 					motor->m_conf->l_max_duty,
-					0.0, motor->m_conf->foc_fw_current_max);
+					0.0, i_fw_max);
 
 			// m_current_off_delay is used to not stop the modulation too soon after leaving FW. If axis decoupling
 			// is not working properly an oscillation can occur on the modulation when changing the current
@@ -769,4 +779,15 @@ void foc_precalc_values(motor_all_state_t *motor) {
 	motor->p_v2_v3_inv_avg_half = (0.5 / motor->p_lq + 0.5 / motor->p_ld) * 0.9; // With the 0.9 we undo the adjustment from the detection
 	motor->m_observer_state.lambda_est = conf_now->foc_motor_flux_linkage;
 	motor->p_duty_norm = TWO_BY_SQRT3 / conf_now->foc_overmod_factor;
+
+#ifdef HW_HAS_PHASE_SHUNTS
+	if (conf_now->foc_control_sample_mode == FOC_CONTROL_SAMPLE_MODE_V0_V7) {
+		motor->p_fs = conf_now->foc_f_zv;
+	} else {
+		motor->p_fs = conf_now->foc_f_zv * 0.5;
+	}
+#else
+	motor->p_fs = conf_now->foc_f_zv * 0.5;
+#endif
+	motor->p_dt = 1.0 / motor->p_fs;
 }

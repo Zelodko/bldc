@@ -2547,6 +2547,46 @@ static lbm_value ext_enc_sample(lbm_value *args, lbm_uint argn) {
 	return ENC_SYM_TRUE;
 }
 
+static lbm_value ext_enc_corr(lbm_value *args, lbm_uint argn) {
+	LBM_CHECK_NUMBER_ALL();
+
+	if (argn != 1 && argn != 2) {
+		return ENC_SYM_TERROR;
+	}
+
+	int ind = lbm_dec_as_i32(args[0]);
+
+	if (ind < 0 || ind >= 360) {
+		return ENC_SYM_TERROR;
+	}
+
+	if (argn >= 2) {
+		int corr = lbm_dec_as_i32(args[1]);
+
+		if (corr < -120 || corr > 120) {
+			return ENC_SYM_TERROR;
+		}
+
+		g_backup.enc_corr[ind] = corr;
+	}
+
+	return lbm_enc_i(g_backup.enc_corr[ind]);
+}
+
+static lbm_value ext_enc_corr_en(lbm_value *args, lbm_uint argn) {
+	LBM_CHECK_NUMBER_ALL();
+
+	if (argn > 1) {
+		return ENC_SYM_TERROR;
+	}
+
+	if (argn == 1) {
+		g_backup.enc_corr_en = lbm_dec_as_i32(args[0]);
+	}
+
+	return lbm_enc_i(g_backup.enc_corr_en);
+}
+
 // CAN-commands
 
 static lbm_value ext_can_msg_age(lbm_value *args, lbm_uint argn) {
@@ -4064,6 +4104,15 @@ static lbm_value ext_conf_set(lbm_value *args, lbm_uint argn) {
 		} else if (compare_symbol(name, &syms_vesc.foc_fw_q_current_factor)) {
 			mcconf->foc_fw_q_current_factor = lbm_dec_as_float(args[1]);
 			changed_mc = 2;
+		} else if (compare_symbol(name, &syms_vesc.foc_fw_backoff)) {
+			mcconf->foc_fw_backoff = lbm_dec_as_float(args[1]);
+			changed_mc = 2;
+		} else if (compare_symbol(name, &syms_vesc.foc_hfi_reset_erpm)) {
+			mcconf->foc_hfi_reset_erpm = lbm_dec_as_float(args[1]);
+			changed_mc = 2;
+		} else if (compare_symbol(name, &syms_vesc.foc_mag_vd_max)) {
+			mcconf->foc_mag_vd_max = lbm_dec_as_float(args[1]);
+			changed_mc = 2;
 		} else if (compare_symbol(name, &syms_vesc.m_encoder_counts)) {
 			mcconf->m_encoder_counts = lbm_dec_as_float(args[1]);
 			changed_mc = 2;
@@ -4183,6 +4232,12 @@ static lbm_value ext_conf_set(lbm_value *args, lbm_uint argn) {
 			changed_app = 2;
 		} else if (compare_symbol(name, &syms_vesc.vr_smart_rev_ramp_time)) {
 			appconf->app_chuk_conf.smart_rev_ramp_time = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_coast_brake_level)) {
+			appconf->app_chuk_conf.coast_brake_level = lbm_dec_as_float(args[1]);
+			changed_app = 2;
+		} else if (compare_symbol(name, &syms_vesc.vr_coast_brake_ramp_time)) {
+			appconf->app_chuk_conf.coast_brake_ramp_time = lbm_dec_as_float(args[1]);
 			changed_app = 2;
 		}
 	}
@@ -4449,6 +4504,12 @@ static lbm_value ext_conf_get(lbm_value *args, lbm_uint argn) {
 		res = lbm_enc_float(mcconf->foc_fw_ramp_time);
 	} else if (compare_symbol(name, &syms_vesc.foc_fw_q_current_factor)) {
 		res = lbm_enc_float(mcconf->foc_fw_q_current_factor);
+	} else if (compare_symbol(name, &syms_vesc.foc_fw_backoff)) {
+		res = lbm_enc_float(mcconf->foc_fw_backoff);
+	} else if (compare_symbol(name, &syms_vesc.foc_hfi_reset_erpm)) {
+		res = lbm_enc_float(mcconf->foc_hfi_reset_erpm);
+	} else if (compare_symbol(name, &syms_vesc.foc_mag_vd_max)) {
+		res = lbm_enc_float(mcconf->foc_mag_vd_max);
 	} else if (compare_symbol(name, &syms_vesc.foc_short_ls_on_zero_duty)) {
 		res = lbm_enc_i(mcconf->foc_short_ls_on_zero_duty);
 	} else if (compare_symbol(name, &syms_vesc.foc_overmod_factor)) {
@@ -4575,6 +4636,10 @@ static lbm_value ext_conf_get(lbm_value *args, lbm_uint argn) {
 		res = lbm_enc_float(appconf->app_chuk_conf.smart_rev_max_duty);
 	} else if (compare_symbol(name, &syms_vesc.vr_smart_rev_ramp_time)) {
 		res = lbm_enc_float(appconf->app_chuk_conf.smart_rev_ramp_time);
+	} else if (compare_symbol(name, &syms_vesc.vr_coast_brake_level)) {
+		res = lbm_enc_float(appconf->app_chuk_conf.coast_brake_level);
+	} else if (compare_symbol(name, &syms_vesc.vr_coast_brake_ramp_time)) {
+		res = lbm_enc_float(appconf->app_chuk_conf.coast_brake_ramp_time);
 	}
 
 	if (defaultcfg) {
@@ -6390,6 +6455,8 @@ void lispif_load_vesc_extensions(void) {
 		lbm_add_extension("observer-error", ext_observer_error);
 		lbm_add_extension("phase-all", ext_phase_all);
 		lbm_add_extension("enc-sample", ext_enc_sample);
+		lbm_add_extension("enc-corr", ext_enc_corr);
+		lbm_add_extension("enc-corr-en", ext_enc_corr_en);
 
 		// Setup values
 		lbm_add_extension("setup-ah", ext_setup_ah);
