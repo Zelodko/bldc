@@ -1085,8 +1085,12 @@ float mcpwm_foc_get_duty_cycle_now(void) {
 	return get_motor_now()->m_motor_state.duty_now;
 }
 
+float mcpwm_foc_get_duty_cycle_abs_filter(void) {
+	return get_motor_now()->m_duty_abs_filtered;
+}
+
 float mcpwm_foc_get_pid_speed_set(void) {
-	return get_motor_now()->m_speed_pid_set_rpm;
+	return get_motor_now()->m_speed_command_rpm;
 }
 
 float mcpwm_foc_get_pid_pos_set(void) {
@@ -1162,12 +1166,12 @@ void mcpwm_foc_set_current_off_delay(float delay_sec) {
 
 float mcpwm_foc_get_tot_current_motor(bool is_second_motor) {
 	volatile motor_all_state_t *motor = M_MOTOR(is_second_motor);
-	return SIGN(motor->m_motor_state.vq * motor->m_motor_state.iq) * motor->m_motor_state.i_abs;
+	return SIGN(motor->m_motor_state.i_bus) * motor->m_motor_state.i_abs;
 }
 
 float mcpwm_foc_get_tot_current_filtered_motor(bool is_second_motor) {
 	volatile motor_all_state_t *motor = M_MOTOR(is_second_motor);
-	return SIGN(motor->m_motor_state.vq * motor->m_motor_state.iq_filter) * motor->m_motor_state.i_abs_filter;
+	return SIGN(motor->m_motor_state.i_bus) * motor->m_motor_state.i_abs_filter;
 }
 
 float mcpwm_foc_get_tot_current_in_motor(bool is_second_motor) {
@@ -1338,6 +1342,14 @@ float mcpwm_foc_get_iq_set(void) {
 	return get_motor_now()->m_iq_set;
 }
 
+float mcpwm_foc_get_id_target(void) {
+	return get_motor_now()->m_motor_state.id_target;
+}
+
+float mcpwm_foc_get_iq_target(void) {
+	return get_motor_now()->m_motor_state.iq_target;
+}
+
 /**
  * Get the filtered direct axis motor current.
  *
@@ -1448,6 +1460,13 @@ float mcpwm_foc_get_phase_observer(void) {
 	return angle;
 }
 
+float mcpwm_foc_get_phase_bemf(void) {
+	float phase_bemf = RAD2DEG_f(atan2f(mcpwm_foc_get_v_beta(), mcpwm_foc_get_v_alpha()));
+	phase_bemf -= SIGN(get_motor_now()->m_pll_speed) * 90.0;
+	utils_norm_angle(&phase_bemf);
+	return phase_bemf;
+}
+
 float mcpwm_foc_get_phase_encoder(void) {
 	float angle = RAD2DEG_f(get_motor_now()->m_phase_now_encoder);
 	utils_norm_angle(&angle);
@@ -1482,6 +1501,14 @@ float mcpwm_foc_get_mod_alpha_measured(void) {
 
 float mcpwm_foc_get_mod_beta_measured(void) {
 	return get_motor_now()->m_motor_state.mod_beta_measured;
+}
+
+float mcpwm_foc_get_v_alpha(void) {
+	return get_motor_now()->m_motor_state.v_alpha;
+}
+
+float mcpwm_foc_get_v_beta(void) {
+	return get_motor_now()->m_motor_state.v_beta;
 }
 
 float mcpwm_foc_get_est_lambda(void) {
@@ -3362,11 +3389,6 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 			}
 
 			switch (conf_now->foc_sensor_mode) {
-			// TODO: FOC_SENSOR_MODE_ENCODER_AB is not implemented as its own mode yet
-			// (falls through to plain encoder handling). Not currently reachable since
-			// no config path sets foc_sensor_mode to it. Give it real AB-quadrature-only
-			// behavior when the motor control core gets its dedicated porting pass.
-			case FOC_SENSOR_MODE_ENCODER_AB:
 			case FOC_SENSOR_MODE_ENCODER:
 				if (encoder_index_found() || virtual_motor_is_connected()) {
 					motor_now->m_motor_state.phase = foc_correct_encoder(
@@ -3384,6 +3406,45 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 					id_set_tmp = 0.0;
 				}
 				break;
+
+			case FOC_SENSOR_MODE_ENCODER_AB:
+				// AB encoder without index pin. Sync encoder to observer at sensorless ERPM
+				// to establish and continuously correct the absolute position.
+				if (fabsf(RADPS2RPM_f(motor_now->m_speed_est_fast)) >= conf_now->foc_sl_erpm) {
+					float obs_deg = RAD2DEG_f(motor_now->m_phase_now_observer);
+					float enc_deg = (obs_deg + conf_now->foc_encoder_offset) / conf_now->foc_encoder_ratio;
+					if (conf_now->foc_encoder_inverted) {
+						enc_deg = 360.0 - enc_deg;
+					}
+					encoder_set_deg(enc_deg);
+				}
+
+				if (encoder_index_found() || virtual_motor_is_connected()) {
+					motor_now->m_motor_state.phase = foc_correct_encoder(
+							motor_now->m_phase_now_observer,
+							motor_now->m_phase_now_encoder,
+							motor_now->m_speed_est_fast,
+							conf_now->foc_sl_erpm,
+							motor_now);
+				} else if (motor_now->m_phase_observer_override) {
+					// Open-loop startup assist before first sync (same as sensorless)
+					motor_now->m_motor_state.phase = motor_now->m_phase_now_observer_override;
+					motor_now->m_observer_state.x1 = motor_now->m_observer_x1_override;
+					motor_now->m_observer_state.x2 = motor_now->m_observer_x2_override;
+					iq_set_tmp += conf_now->foc_sl_openloop_boost_q * SIGN(iq_set_tmp);
+					if (conf_now->foc_sl_openloop_max_q > conf_now->cc_min_current) {
+						utils_truncate_number_abs(&iq_set_tmp, conf_now->foc_sl_openloop_max_q);
+					}
+				} else {
+					// Use observer until first sync at sensorless ERPM
+					motor_now->m_motor_state.phase = motor_now->m_phase_now_observer;
+				}
+
+				if (!motor_now->m_phase_override && motor_now->m_control_mode != CONTROL_MODE_OPENLOOP_PHASE) {
+					id_set_tmp = 0.0;
+				}
+				break;
+
 			case FOC_SENSOR_MODE_HALL:
 				motor_now->m_motor_state.phase = foc_correct_hall(motor_now->m_phase_now_observer, dt, motor_now,
 						utils_read_hall(motor_now != &m_motor_1, conf_now->m_hall_extra_samples));
@@ -3567,7 +3628,9 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 		// Set motor phase
 		{
 			switch (conf_now->foc_sensor_mode) {
-			// TODO: see fallthrough note above the other foc_sensor_mode switch in this file.
+			// This secondary phase switch (unlike the one in the main sensor-mode
+			// dispatch above) doesn't need AB-specific sync-to-observer handling -
+			// matches upstream, which also just falls through to plain encoder here.
 			case FOC_SENSOR_MODE_ENCODER_AB:
 			case FOC_SENSOR_MODE_ENCODER:
 				motor_now->m_motor_state.phase = foc_correct_encoder(

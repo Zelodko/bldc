@@ -2156,6 +2156,16 @@ static lbm_value ext_get_iq_set(lbm_value *args, lbm_uint argn) {
 	return lbm_enc_float(mcpwm_foc_get_iq_set());
 }
 
+static lbm_value ext_get_id_target(lbm_value *args, lbm_uint argn) {
+	(void)args; (void)argn;
+	return lbm_enc_float(mcpwm_foc_get_id_target());
+}
+
+static lbm_value ext_get_iq_target(lbm_value *args, lbm_uint argn) {
+	(void)args; (void)argn;
+	return lbm_enc_float(mcpwm_foc_get_iq_target());
+}
+
 static lbm_value ext_get_vd(lbm_value *args, lbm_uint argn) {
 	int filter = 0;
 	if (!check_arg_filter(args, argn, &filter)) {
@@ -2211,6 +2221,11 @@ static lbm_value ext_foc_hfi_res(lbm_value *args, lbm_uint argn) {
 static lbm_value ext_get_duty(lbm_value *args, lbm_uint argn) {
 	(void)args; (void)argn;
 	return lbm_enc_float(mc_interface_get_duty_cycle_now());
+}
+
+static lbm_value ext_get_duty_abs(lbm_value *args, lbm_uint argn) {
+	(void)args; (void)argn;
+	return lbm_enc_float(mcpwm_foc_get_duty_cycle_abs_filter());
 }
 
 static lbm_value ext_get_rpm(lbm_value *args, lbm_uint argn) {
@@ -2441,6 +2456,95 @@ static lbm_value ext_phase_observer(lbm_value *args, lbm_uint argn) {
 static lbm_value ext_observer_error(lbm_value *args, lbm_uint argn) {
 	(void)args; (void)argn;
 	return lbm_enc_float(utils_angle_difference(mcpwm_foc_get_phase_observer(), mcpwm_foc_get_phase_encoder()));
+}
+
+static lbm_value ext_phase_all(lbm_value *args, lbm_uint argn) {
+	(void)args; (void)argn;
+
+	float phase_observer = mcpwm_foc_get_phase_observer();
+	float phase_encoder = mcpwm_foc_get_phase_encoder();
+	float phase_bemf = mcpwm_foc_get_phase_bemf();
+	float pos_encoder = encoder_read_deg();
+	float phase_hall = mcpwm_foc_get_phase_hall();
+
+	float err_observer_encoder = utils_angle_difference(mcpwm_foc_get_phase_observer(), mcpwm_foc_get_phase_encoder());
+	float err_bemf_encoder = utils_angle_difference(mcpwm_foc_get_phase_bemf(), mcpwm_foc_get_phase_encoder());
+	float err_observer_bemf = utils_angle_difference(mcpwm_foc_get_phase_observer(), mcpwm_foc_get_phase_bemf());
+	float err_bemf_hall = utils_angle_difference(mcpwm_foc_get_phase_bemf(), mcpwm_foc_get_phase_hall());
+
+	lbm_value phase_all = ENC_SYM_NIL;
+	phase_all = lbm_cons(lbm_enc_float(err_bemf_hall), phase_all);
+	phase_all = lbm_cons(lbm_enc_float(phase_hall), phase_all);
+	phase_all = lbm_cons(lbm_enc_float(err_observer_bemf), phase_all);
+	phase_all = lbm_cons(lbm_enc_float(err_bemf_encoder), phase_all);
+	phase_all = lbm_cons(lbm_enc_float(err_observer_encoder), phase_all);
+	phase_all = lbm_cons(lbm_enc_float(pos_encoder), phase_all);
+	phase_all = lbm_cons(lbm_enc_float(phase_bemf), phase_all);
+	phase_all = lbm_cons(lbm_enc_float(phase_encoder), phase_all);
+	phase_all = lbm_cons(lbm_enc_float(phase_observer), phase_all);
+
+	return phase_all;
+}
+
+typedef struct {
+	int samples;
+	uint8_t *data;
+	lbm_cid id;
+} enc_sample_args;
+
+static void enc_sample_task(void *arg) {
+	enc_sample_args *a = (enc_sample_args*)arg;
+	int restart_cnt = lispif_get_restart_cnt();
+
+	bool ok = true;
+	for (int i = 0;i < a->samples;i++) {
+		float err_bemf_encoder = utils_angle_difference(mcpwm_foc_get_phase_bemf(), mcpwm_foc_get_phase_encoder());
+		float pos_encoder = encoder_read_deg();
+
+		int32_t ind = (int)pos_encoder;
+		if (ind < 0 || ind > 360) {
+			ok = false;
+			break;
+		}
+
+		ind *= 8;
+		int32_t ind2 = ind;
+
+		buffer_append_float32_auto(a->data, buffer_get_float32_auto(a->data, &ind) + err_bemf_encoder, &ind2);
+		buffer_append_float32_auto(a->data, buffer_get_float32_auto(a->data, &ind) + 1, &ind2);
+
+		chThdSleep(1);
+	}
+
+	if (restart_cnt == lispif_get_restart_cnt()) {
+		lbm_unblock_ctx_unboxed(a->id, ok ? ENC_SYM_TRUE : ENC_SYM_EERROR);
+	}
+}
+
+static lbm_value ext_enc_sample(lbm_value *args, lbm_uint argn) {
+	if (argn != 2 || !lbm_is_array_rw(args[0]) || !lbm_is_number(args[1])) {
+		return ENC_SYM_TERROR;
+	}
+
+	lbm_array_header_t *array = lbm_dec_array_rw(args[0]);
+	if (array->size < (360 * 2 * 4)) {
+		return ENC_SYM_TERROR;
+	}
+
+	int samples = lbm_dec_as_i32(args[1]);
+	if (samples <= 0 || samples > 300000) {
+		return ENC_SYM_TERROR;
+	}
+
+	static enc_sample_args a;
+	a.samples = samples;
+	a.data = (uint8_t*)array->data;
+	a.id = lbm_get_current_cid();
+
+	lbm_block_ctx_from_extension();
+	worker_execute(enc_sample_task, &a);
+
+	return ENC_SYM_TRUE;
 }
 
 // CAN-commands
@@ -6232,6 +6336,8 @@ void lispif_load_vesc_extensions(void) {
 		lbm_add_extension("get-iq", ext_get_iq);
 		lbm_add_extension("get-id-set", ext_get_id_set);
 		lbm_add_extension("get-iq-set", ext_get_iq_set);
+		lbm_add_extension("get-id-target", ext_get_id_target);
+		lbm_add_extension("get-iq-target", ext_get_iq_target);
 		lbm_add_extension("get-vd", ext_get_vd);
 		lbm_add_extension("get-vq", ext_get_vq);
 		lbm_add_extension("get-est-lambda", ext_foc_est_lambda);
@@ -6239,6 +6345,7 @@ void lispif_load_vesc_extensions(void) {
 		lbm_add_extension("get-est-ind", ext_foc_est_ind);
 		lbm_add_extension("get-hfi-res", ext_foc_hfi_res);
 		lbm_add_extension("get-duty", ext_get_duty);
+		lbm_add_extension("get-duty-abs", ext_get_duty_abs);
 		lbm_add_extension("get-rpm", ext_get_rpm);
 		lbm_add_extension("get-rpm-fast", ext_get_rpm_fast);
 		lbm_add_extension("get-rpm-faster", ext_get_rpm_faster);
@@ -6272,6 +6379,8 @@ void lispif_load_vesc_extensions(void) {
 		lbm_add_extension("phase-hall", ext_phase_hall);
 		lbm_add_extension("phase-observer", ext_phase_observer);
 		lbm_add_extension("observer-error", ext_observer_error);
+		lbm_add_extension("phase-all", ext_phase_all);
+		lbm_add_extension("enc-sample", ext_enc_sample);
 
 		// Setup values
 		lbm_add_extension("setup-ah", ext_setup_ah);
