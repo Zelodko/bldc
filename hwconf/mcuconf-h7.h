@@ -66,7 +66,12 @@
  * Register constants are taken from the ST header.
  */
 #define STM32_VOS                           STM32_VOS_SCALE1
-#define STM32_PWR_CR1                       (PWR_CR1_SVOS_1 | PWR_CR1_SVOS_0)
+// PWR_CR1_PVDEN + PWR_CR1_PLS_LEV6 arm the PVD (under-voltage) detector at
+// its highest internal threshold (~2.85V/2.75V rising/falling), matching
+// the F4 port's STM32_PLS_LEV6 choice. See STM32_EXTI16_ISR below for the
+// interrupt handler; EXTI16 edge/mask setup happens at runtime in main.c
+// since there is no ChibiOS PVD driver on H7.
+#define STM32_PWR_CR1                       (PWR_CR1_SVOS_1 | PWR_CR1_SVOS_0 | PWR_CR1_PVDEN | PWR_CR1_PLS_LEV6)
 #define STM32_PWR_CR2                       (PWR_CR2_BREN)
 #define STM32_PWR_CR3                       (PWR_CR3_LDOEN | PWR_CR3_USB33DEN)
 #define STM32_PWR_CPUCR                     0
@@ -178,6 +183,21 @@
  * IRQ system settings.
  */
 #define STM32_EXTI16_IS_USED 	// Used for PVD
+
+// Pulls in stm32_exti.c's extiEnableLine()/extiEnableGroup1() implementation,
+// needed to arm the PVD interrupt's edges/mask at runtime in main.c. Not
+// defined by any driver we use otherwise (only the RTC driver defines this
+// normally, and we don't use ChibiOS's RTC driver).
+#if !defined(STM32_EXTI_REQUIRED)
+#define STM32_EXTI_REQUIRED
+#endif
+
+// ChibiOS's shared EXTI16 handler (stm32_exti16.inc) calls this if defined.
+// There is no ChibiOS driver for the PVD peripheral itself on H7, so this is
+// the hook point for the under-voltage fault handler implemented in
+// irq_handlers.c.
+void pvd_exti_isr(uint32_t pr, uint32_t line);
+#define STM32_EXTI16_ISR(pr, line) pvd_exti_isr(pr, line)
 
 #define STM32_IRQ_EXTI0_PRIORITY            6
 #define STM32_IRQ_EXTI1_PRIORITY            6

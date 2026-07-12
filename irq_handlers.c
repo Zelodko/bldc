@@ -66,3 +66,13 @@ CH_IRQ_HANDLER(BusFault_Handler) {
 CH_IRQ_HANDLER(UsageFault_Handler) {
 	main_stop_motor_and_reset();
 }
+
+// Called from ChibiOS's shared EXTI16 handler (see STM32_EXTI16_ISR in
+// hwconf/mcuconf-h7.h). Supply voltage dropped below the PVD threshold
+// (~2.85V/2.75V rising/falling), which could corrupt an ongoing flash
+// programming operation.
+void pvd_exti_isr(uint32_t pr, uint32_t line) {
+	if ((pr & EXTI_MASK1(line)) != 0) {
+		mc_interface_fault_stop(FAULT_CODE_MCU_UNDER_VOLTAGE, false, true);
+	}
+}

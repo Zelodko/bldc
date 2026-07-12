@@ -259,6 +259,12 @@ int main(void) {
 	halInit();
 	chSysInit();
 
+	// Arm the PVD (under-voltage) interrupt. PWR_CR1_PVDEN/PLS are already
+	// set via mcuconf-h7.h's STM32_PWR_CR1 and applied by halInit(); EXTI16
+	// still needs its edges and interrupt mask configured here since there
+	// is no ChibiOS driver for the PVD peripheral itself.
+	extiEnableLine(16, EXTI_MODE_BOTH_EDGES);
+
 	// Initialize the enable pins here and disable them
 	// to avoid excessive current draw at boot because of
 	// floating pins.
