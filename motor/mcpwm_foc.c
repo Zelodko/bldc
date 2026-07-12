@@ -1084,6 +1084,10 @@ void mcpwm_foc_set_openloop_duty_phase(float dutyCycle, float phase) {
 	}
 }
 
+void mcpwm_foc_set_fw_override(float current) {
+	get_motor_now()->m_i_fw_override = current;
+}
+
 float mcpwm_foc_get_duty_cycle_set(void) {
 	return get_motor_now()->m_duty_cycle_set;
 }
@@ -3593,9 +3597,14 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 
 		const float mod_q = motor_now->m_motor_state.mod_q_filter;
 
-		// Running FW from the 1 khz timer seems fast enough.
-//		run_fw(motor_now, dt);
-		id_set_tmp -= motor_now->m_i_fw_set;
+		// Field Weakening
+		if (motor_now->m_i_fw_override > 0.01) {
+			motor_now->m_i_fw_set = motor_now->m_i_fw_override;
+		} else {
+			foc_run_fw(motor_now, dt);
+		}
+
+		id_set_tmp = utils_max_abs(id_set_tmp, -motor_now->m_i_fw_set);
 		iq_set_tmp -= SIGN(mod_q) * motor_now->m_i_fw_set * conf_now->foc_fw_q_current_factor;
 
 		// Apply current limits
@@ -3868,8 +3877,6 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 // Private functions
 
 static void timer_update(motor_all_state_t *motor, float dt) {
-	foc_run_fw(motor, dt);
-
 	const mc_configuration *conf_now = motor->m_conf;
 
 	// Calculate temperature-compensated parameters here
@@ -4589,8 +4596,8 @@ static void control_current(motor_all_state_t *motor, float dt) {
 	if (motor->m_control_mode < CONTROL_MODE_HANDBRAKE && conf_now->foc_cc_decoupling != FOC_CC_DECOUPLING_DISABLED) {
 		switch (conf_now->foc_cc_decoupling) {
 		case FOC_CC_DECOUPLING_CROSS:
-			dec_vd = state_m->iq_filter * motor->m_speed_est_fast * motor->p_lq; // m_speed_est_fast is ωe in [rad/s]
-			dec_vq = state_m->id_filter * motor->m_speed_est_fast * motor->p_ld;
+			dec_vd = state_m->iq * motor->m_speed_est_fast * motor->p_lq; // m_speed_est_fast is ωe in [rad/s]
+			dec_vq = state_m->id * motor->m_speed_est_fast * motor->p_ld;
 			break;
 
 		case FOC_CC_DECOUPLING_BEMF:
@@ -4598,8 +4605,8 @@ static void control_current(motor_all_state_t *motor, float dt) {
 			break;
 
 		case FOC_CC_DECOUPLING_CROSS_BEMF:
-			dec_vd = state_m->iq_filter * motor->m_speed_est_fast * motor->p_lq;
-			dec_vq = state_m->id_filter * motor->m_speed_est_fast * motor->p_ld;
+			dec_vd = state_m->iq * motor->m_speed_est_fast * motor->p_lq;
+			dec_vq = state_m->id * motor->m_speed_est_fast * motor->p_ld;
 			dec_bemf = motor->m_speed_est_fast * conf_now->foc_motor_flux_linkage;
 			break;
 
@@ -4617,16 +4624,14 @@ static void control_current(motor_all_state_t *motor, float dt) {
 
 	// Saturation and anti-windup. Notice that the d-axis has priority as it controls field
 	// weakening and the efficiency.
-	float vd_presat = state_m->vd;
-	utils_truncate_number_abs((float*)&state_m->vd, max_v_mag);
-	state_m->vd_int += (state_m->vd - vd_presat);
+	utils_truncate_number_abs((float*)&state_m->vd, max_v_mag * conf_now->foc_mag_vd_max);
+	utils_truncate_number_abs((float*)&state_m->vd_int, max_v_mag * conf_now->foc_mag_vd_max);
 
 	float max_vq = sqrtf(SQ(max_v_mag) - SQ(state_m->vd));
-	float vq_presat = state_m->vq;
-	utils_truncate_number_abs((float*)&state_m->vq, max_vq);
-	state_m->vq_int += (state_m->vq - vq_presat);
+	UTILS_NAN_ZERO(max_vq);
 
-	utils_saturate_vector_2d((float*)&state_m->vd, (float*)&state_m->vq, max_v_mag);
+	utils_truncate_number_abs((float*)&state_m->vq, max_vq);
+	utils_truncate_number_abs((float*)&state_m->vq_int, max_vq);
 
 	// mod_d and mod_q are normalized such that 1 corresponds to the max possible voltage:
 	//    voltage_normalize = 1/(2/3*V_bus)
