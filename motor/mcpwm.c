@@ -2639,11 +2639,20 @@ static void set_next_timer_settings(mc_timer_struct *settings) {
  * Try to apply the new timer settings. This is really not an elegant solution, but for now it is
  * the best I can come up with.
  */
+// Safety margin (in TIM1 ticks) from the counter wraparound point required before
+// applying new timer settings, expressed as a time constant rather than a fixed tick
+// count so it stays correct across different core/timer clock speeds. Matches
+// upstream's raw 10/500-tick margins at F4's 168MHz TIM1 clock; scaled here by this
+// board's actual SYSTEM_TIMER_CLOCK (used verbatim, this would be ~30% too tight on
+// this board's faster 240MHz TIM1 clock).
+#define UPDATE_MARGIN_MIN ((uint32_t)((10.0f / 168000000.0f) * SYSTEM_TIMER_CLOCK))
+#define UPDATE_MARGIN_MAX ((uint32_t)((500.0f / 168000000.0f) * SYSTEM_TIMER_CLOCK))
+
 static void update_timer_attempt(void) {
 	utils_sys_lock_cnt();
 
 	// Set the next timer settings if an update is far enough away
-	if (!timer_struct.updated && TIM1->CNT > 10 && TIM1->CNT < (TIM1->ARR - 500)) {
+	if (!timer_struct.updated && TIM1->CNT > UPDATE_MARGIN_MIN && TIM1->CNT < (TIM1->ARR - UPDATE_MARGIN_MAX)) {
 		// Disable preload register updates
 		TIM1->CR1 |= TIM_CR1_UDIS;
 		TIM8->CR1 |= TIM_CR1_UDIS;
