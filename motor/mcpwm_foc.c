@@ -55,7 +55,7 @@ static volatile int m_isr_motor = 0;
 
 // Private functions
 static void control_current(motor_all_state_t *motor, float dt);
-static void update_valpha_vbeta(motor_all_state_t *motor, float mod_alpha, float mod_beta);
+static void update_valpha_vbeta(motor_all_state_t *motor, float mod_alpha, float mod_beta, float voltage_normalize);
 static void stop_pwm_hw(motor_all_state_t *motor);
 static void start_pwm_hw(motor_all_state_t *motor);
 static void full_brake_hw(motor_all_state_t *motor);
@@ -3129,8 +3129,25 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 #endif
 
 	// Use the best current samples depending on the modulation state.
+
+	// Minimum shunt settling time before a raw ADC reading is trusted, expressed as a
+	// time constant rather than a fixed tick count so it stays correct across different
+	// core/timer clock speeds. Matches upstream's 900-tick threshold at F4's 168MHz TIM1
+	// clock (900 / 168e6 = 5.357us); scaled here by this board's actual SYSTEM_TIMER_CLOCK
+	// so the real settling margin is preserved instead of upstream's raw tick count (which
+	// would be ~30% too short on this board's faster 240MHz TIM1 clock if used verbatim).
+#define SHUNT_PICK_THR ((uint32_t)((900.0f / 168000000.0f) * SYSTEM_TIMER_CLOCK))
+
+#ifdef HW_HAS_3_SHUNTS
+	bool full_clarke = true;
+#else
+	bool full_clarke = false;
+#endif
+
 #ifdef HW_HAS_3_SHUNTS
 	if (conf_now->foc_current_sample_mode == FOC_CURRENT_SAMPLE_MODE_HIGH_CURRENT) {
+		full_clarke = false;
+
 		// High current sampling mode. Choose the lower currents to derive the highest one
 		// in order to be able to measure higher currents.
 		const float i0_abs = fabsf(curr0);
@@ -3147,11 +3164,11 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 	} else if (conf_now->foc_current_sample_mode == FOC_CURRENT_SAMPLE_MODE_LONGEST_ZERO) {
 #ifdef HW_HAS_PHASE_SHUNTS
 		if (is_v7) {
-			if (tim->CCR1 > 500 && tim->CCR2 > 500) {
-				// Use the same 2 shunts on low modulation, as that will avoid jumps in the current reading.
-				// This is especially important when using HFI.
-				curr2 = -(curr0 + curr1);
-			} else {
+			if (tim->CCR1 < SHUNT_PICK_THR ||
+					tim->CCR2 < SHUNT_PICK_THR ||
+					tim->CCR3 < SHUNT_PICK_THR) {
+				full_clarke = false;
+
 				if (tim->CCR1 < tim->CCR2 && tim->CCR1 < tim->CCR3) {
 					curr0 = -(curr1 + curr2);
 				} else if (tim->CCR2 < tim->CCR1 && tim->CCR2 < tim->CCR3) {
@@ -3161,11 +3178,11 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 				}
 			}
 		} else {
-			if (tim->CCR1 < (tim->ARR - 500) && tim->CCR2 < (tim->ARR - 500)) {
-				// Use the same 2 shunts on low modulation, as that will avoid jumps in the current reading.
-				// This is especially important when using HFI.
-				curr2 = -(curr0 + curr1);
-			} else {
+			if (tim->CCR1 > (tim->ARR - SHUNT_PICK_THR) ||
+					tim->CCR2 > (tim->ARR - SHUNT_PICK_THR) ||
+					tim->CCR3 > (tim->ARR - SHUNT_PICK_THR)) {
+				full_clarke = false;
+
 				if (tim->CCR1 > tim->CCR2 && tim->CCR1 > tim->CCR3) {
 					curr0 = -(curr1 + curr2);
 				} else if (tim->CCR2 > tim->CCR1 && tim->CCR2 > tim->CCR3) {
@@ -3176,11 +3193,11 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 			}
 		}
 #else
-		if (tim->CCR1 < (tim->ARR - 500) && tim->CCR2 < (tim->ARR - 500)) {
-			// Use the same 2 shunts on low modulation, as that will avoid jumps in the current reading.
-			// This is especially important when using HFI.
-			curr2 = -(curr0 + curr1);
-		} else {
+		if (tim->CCR1 > (tim->ARR - SHUNT_PICK_THR) ||
+				tim->CCR2 > (tim->ARR - SHUNT_PICK_THR) ||
+				tim->CCR3 > (tim->ARR - SHUNT_PICK_THR)) {
+			full_clarke = false;
+
 			if (tim->CCR1 > tim->CCR2 && tim->CCR1 > tim->CCR3) {
 				curr0 = -(curr1 + curr2);
 			} else if (tim->CCR2 > tim->CCR1 && tim->CCR2 > tim->CCR3) {
@@ -3192,7 +3209,7 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 #endif
 	}
 #endif
-	
+
 	// Store the currents for sampling
 	ADC_curr_norm_value[0 + norm_curr_ofs] = curr0;
 	ADC_curr_norm_value[1 + norm_curr_ofs] = curr1;
@@ -3208,7 +3225,8 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 	volatile bool encoder_is_being_used = false;
 
 	if (virtual_motor_is_connected()) {
-		if (conf_now->foc_sensor_mode == FOC_SENSOR_MODE_ENCODER ) {
+		if (conf_now->foc_sensor_mode == FOC_SENSOR_MODE_ENCODER ||
+				conf_now->foc_sensor_mode == FOC_SENSOR_MODE_ENCODER_AB) {
 			enc_ang = virtual_motor_get_angle_deg();
 			encoder_is_being_used = true;
 		}
@@ -3224,14 +3242,24 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 		if (conf_now->foc_encoder_inverted) {
 			phase_tmp = 360.0 - phase_tmp;
 		}
+
 		phase_tmp *= conf_now->foc_encoder_ratio;
 		phase_tmp -= conf_now->foc_encoder_offset;
+
+		// Apply error correction
+		if (g_backup.enc_corr_en == 1) {
+			utils_norm_angle((float*)(&enc_ang)); // Probably not needed
+			int corr_ind = (int)enc_ang;
+			utils_truncate_number_int(&corr_ind, 0, 359);
+			phase_tmp -= (float)g_backup.enc_corr[corr_ind];
+		}
+
 		utils_norm_angle((float*)&phase_tmp);
 		motor_now->m_phase_now_encoder = DEG2RAD_f(phase_tmp);
 	}
 
 	if (motor_now->m_state == MC_STATE_RUNNING) {
-		if (conf_now->foc_current_sample_mode == FOC_CURRENT_SAMPLE_MODE_ALL_SENSORS) {
+		if (full_clarke) {
 			// Full Clarke Transform
 			motor_now->m_motor_state.i_alpha = (2.0 / 3.0) * ia - (1.0 / 3.0) * ib - (1.0 / 3.0) * ic;
 			motor_now->m_motor_state.i_beta = ONE_BY_SQRT3 * ib - ONE_BY_SQRT3 * ic;
@@ -3614,7 +3642,7 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 		motor_now->m_motor_state.i_abs_filter = 0.0;
 
 		// Track back emf
-		update_valpha_vbeta(motor_now, 0.0, 0.0);
+		update_valpha_vbeta(motor_now, 0.0, 0.0, 1.5 / motor_now->m_motor_state.v_bus);
 
 		// Run observer
 		foc_observer_update(motor_now->m_motor_state.v_alpha, motor_now->m_motor_state.v_beta,
@@ -4625,7 +4653,7 @@ static void control_current(motor_all_state_t *motor, float dt) {
 	state_m->mod_alpha_raw = c * state_m->mod_d - s * state_m->mod_q;
 	state_m->mod_beta_raw  = c * state_m->mod_q + s * state_m->mod_d;
 
-	update_valpha_vbeta(motor, state_m->mod_alpha_raw, state_m->mod_beta_raw);
+	update_valpha_vbeta(motor, state_m->mod_alpha_raw, state_m->mod_beta_raw, voltage_normalize);
 
 	// Dead time compensated values for vd and vq. Note that these are not used to control the switching times.
 	state_m->vd = c * motor->m_motor_state.v_alpha + s * motor->m_motor_state.v_beta;
@@ -4944,7 +4972,7 @@ static void control_current(motor_all_state_t *motor, float dt) {
 }
 
 __attribute__((section(".itcm_text")))
-static void update_valpha_vbeta(motor_all_state_t *motor, float mod_alpha, float mod_beta) {
+static void update_valpha_vbeta(motor_all_state_t *motor, float mod_alpha, float mod_beta, float voltage_normalize) {
 	motor_state_t *state_m = &motor->m_motor_state;
 	mc_configuration *conf_now = motor->m_conf;
 	float Va, Vb, Vc;
@@ -5023,9 +5051,6 @@ static void update_valpha_vbeta(motor_all_state_t *motor, float mod_alpha, float
 	// Keep the modulation updated so that the filter stays updated
 	// even when the motor is undriven.
 	if (motor->m_state != MC_STATE_RUNNING) {
-		/* voltage_normalize = 1/(2/3*V_bus) */
-		const float voltage_normalize = 1.5 / state_m->v_bus;
-
 		mod_alpha = v_alpha * voltage_normalize;
 		mod_beta = v_beta * voltage_normalize;
 	}
