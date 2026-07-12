@@ -616,6 +616,9 @@ void terminal_process_string(char *str) {
 
 		commands_printf("Odometer : %llu m", mc_interface_get_odometer());
 		commands_printf("Runtime  : %llu s", g_backup.runtime);
+		commands_printf("Enc Corr EN : %d", g_backup.enc_corr_en);
+		commands_printf("Bkp CAN ID  : %d", g_backup.can_id);
+		commands_printf("Bkp CAN Baud: %d", g_backup.can_baud);
 
 		float curr0_offset;
 		float curr1_offset;

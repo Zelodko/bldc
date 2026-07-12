@@ -64,6 +64,9 @@ void app_set_configuration(app_configuration *conf) {
 	}
 #endif
 
+	bool uart_changed = conf->app_uart_baudrate != appconf.app_uart_baudrate ||
+			conf->permanent_uart_enabled != appconf.permanent_uart_enabled;
+
 	appconf = *conf;
 
 	if (app_changed) {
@@ -85,6 +88,7 @@ void app_set_configuration(app_configuration *conf) {
 	imu_init(&conf->imu_conf);
 
 	if (app_changed) {
+#ifndef HW_OVERRIDE_PIN_PPM_BUZZER
 		if (appconf.app_to_use != APP_PPM &&
 				appconf.app_to_use != APP_PPM_UART &&
 				appconf.servo_out_enable) {
@@ -93,10 +97,13 @@ void app_set_configuration(app_configuration *conf) {
 		} else {
 			pwm_servo_stop();
 		}
+#endif
 
 		switch (appconf.app_to_use) {
 		case APP_PPM:
+#ifndef HW_OVERRIDE_PIN_PPM_BUZZER
 			app_ppm_start();
+#endif
 			break;
 
 		case APP_ADC:
@@ -110,7 +117,9 @@ void app_set_configuration(app_configuration *conf) {
 
 		case APP_PPM_UART:
 			//hw_stop_i2c();
+#ifndef HW_OVERRIDE_PIN_PPM_BUZZER
 			app_ppm_start();
+#endif
 			app_uartcomm_start(UART_PORT_COMM_HEADER);
 			break;
 
@@ -155,8 +164,12 @@ void app_set_configuration(app_configuration *conf) {
 	app_ppm_configure(&appconf.app_ppm_conf);
 	app_adc_configure(&appconf.app_adc_conf);
 	app_pas_configure(&appconf.app_pas_conf);
-	app_uartcomm_configure(appconf.app_uart_baudrate, true, UART_PORT_COMM_HEADER);
-	app_uartcomm_configure(0, appconf.permanent_uart_enabled, UART_PORT_BUILTIN);
+
+	if (uart_changed) {
+		app_uartcomm_configure(appconf.app_uart_baudrate, true, UART_PORT_COMM_HEADER);
+		app_uartcomm_configure(0, appconf.permanent_uart_enabled, UART_PORT_BUILTIN);
+	}
+
 	app_nunchuk_configure(&appconf.app_chuk_conf);
 
 #ifdef APP_CUSTOM_TO_USE

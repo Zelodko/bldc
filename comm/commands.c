@@ -1886,6 +1886,7 @@ void commands_apply_mcconf_hw_limits(mc_configuration *mcconf) {
 	utils_truncate_number(&mcconf->l_current_max_scale, 0.0, 1.0);
 	utils_truncate_number(&mcconf->l_current_min_scale, 0.0, 1.0);
 	utils_truncate_number(&mcconf->l_erpm_start, 0.0, 1.0);
+	utils_truncate_number(&mcconf->foc_overmod_factor, 1.0, 1.5);
 
 	float ctrl_loop_freq = 0.0;
 
@@ -1931,6 +1932,10 @@ void commands_apply_mcconf_hw_limits(mc_configuration *mcconf) {
     // A division by 0 is avoided in the code, but getting close can still make things
     // oscillate. At the moment we leave the responsibility of setting sane values
     // to the user.
+
+#if !MCCONF_L_SLOW_ABS_OVERCURRENT
+    mcconf->l_slow_abs_current = false;
+#endif
 
 #ifdef HW_LIM_CURRENT
 	utils_truncate_number(&mcconf->l_current_max, HW_LIM_CURRENT);
