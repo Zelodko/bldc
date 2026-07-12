@@ -27,6 +27,8 @@
 // Private variables
 static volatile int sys_lock_cnt = 0;
 
+int(*utils_read_hall_fun)(bool is_second_motor, int samples) = utils_read_hall_hw;
+
 /**
  * A system locking function with a counter. For every lock, a corresponding unlock must
  * exist to unlock the system. That means, if lock is called five times, unlock has to
@@ -87,7 +89,7 @@ uint8_t utils_second_motor_id(void) {
  * The state of the three hall sensors.
  */
 __attribute__((section(".itcm_text")))
-int utils_read_hall(bool is_second_motor, int samples) {
+int utils_read_hall_hw(bool is_second_motor, int samples) {
 	samples = 1 + 2 * samples;
 
 	int h1 = 0, h2 = 0, h3 = 0;
