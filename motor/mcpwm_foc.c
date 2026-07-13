@@ -411,10 +411,21 @@ void mcpwm_foc_init(mc_configuration *conf_m1, mc_configuration *conf_m2) {
 
 
 	// Configure DMA Stream to pull data from ADC
+	//
+	// All three streams are configured below via direct register writes rather than
+	// ChibiOS's dmaStream*() accessors, but they still need to go through
+	// dmaStreamAlloc() once each so the driver's allocated_mask marks them reserved.
+	// Without this, streams 2/3 are invisible to the allocator - any other peripheral
+	// initialized later with a mcuconf.h *_DMA_STREAM set to STM32_DMA_STREAM_ID_ANY
+	// (I2C/SPI/UART all default to ANY in mcuconf-h7.h) can and will get handed one of
+	// these "free" streams, resetting its CR to 0 and silently killing that ADC's
+	// current/voltage sampling with no DMA error flag raised anywhere.
 	dmaStreamAlloc(STM32_DMA_STREAM_ID(1, 1),
 					  5,
 					  (stm32_dmaisr_t)mcpwm_foc_adc_int_handler,
 					  (void *)0);
+	dmaStreamAlloc(STM32_DMA_STREAM_ID(1, 2), 5, NULL, (void *)0);
+	dmaStreamAlloc(STM32_DMA_STREAM_ID(1, 3), 5, NULL, (void *)0);
 
     DMA1_Stream1->CR = 0;
     DMA1_Stream2->CR = 0;
