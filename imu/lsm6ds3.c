@@ -33,7 +33,6 @@ static SPIDriver *m_hwspi_dev;
 static volatile uint16_t lsm6ds3_addr;
 static int rate_hz = 1000;
 static IMU_FILTER filter;
-static const uint8_t spi_tx_0_12[12] = {0};
 
 static void terminal_read_reg(int argc, const char **argv);
 static bool read_reg(uint8_t reg, uint8_t *res);
@@ -330,15 +329,17 @@ static bool read_gyro_accel(uint8_t *res) {
 		chMtxUnlock(&(m_spi_bb->mutex));
 		ok = true;
 	} else if (m_hwspi_dev) {
-		uint8_t txb[1];
-		uint8_t rxb[1];
-
+		// Polled exchange here too, same reason as read_reg()/write_reg(): the
+		// DMA version of spiExchange() seems to freeze the CAN process thread.
+		// This one runs continuously once the sample thread is up (unlike the
+		// one-shot config reads), so it's the one that actually matters.
 		spiAcquireBus(m_hwspi_dev);
 		spiSelect(m_hwspi_dev);
-		txb[0] = LSM6DS3_ACC_GYRO_OUTX_L_G | 0x80;
-		spiExchange(m_hwspi_dev, 1, txb, rxb);
+		spiPolledExchange(m_hwspi_dev, LSM6DS3_ACC_GYRO_OUTX_L_G | 0x80);
 		spi_bb_delay_short();
-		spiExchange(m_hwspi_dev, 12, spi_tx_0_12, res);
+		for (int i = 0;i < 12;i++) {
+			res[i] = spiPolledExchange(m_hwspi_dev, 0);
+		}
 		spiUnselect(m_hwspi_dev);
 		spiReleaseBus(m_hwspi_dev);
 		ok = true;

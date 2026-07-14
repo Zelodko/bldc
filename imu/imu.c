@@ -57,8 +57,12 @@ static char *m_imu_type_internal = "Unknown";
 #define SPI_BaudRatePrescaler_64        (5 << SPI_CFG1_MBR_Pos)
 #define SPI_BaudRatePrescaler_128       (6 << SPI_CFG1_MBR_Pos)
 #define SPI_BaudRatePrescaler_256       (7 << SPI_CFG1_MBR_Pos)
-#define SPI_DATASIZE_8BIT				8
-#define SPI_DATASIZE_16BIT				16
+// SPI_CFG1_DSIZE encodes bits-per-frame minus 1 (0x1F mask, "Bits number in
+// single SPI data frame" per the H7 reference manual) - not the raw bit
+// count. Using the raw count here (8, 16) configured 9-bit/17-bit frames
+// instead of 8-bit/16-bit, desynchronizing every byte boundary on the wire.
+#define SPI_DATASIZE_8BIT				7
+#define SPI_DATASIZE_16BIT				15
 #define SPI_MODE_0						0
 #define SPI_MODE_1						SPI_CFG2_CPHA
 #define SPI_MODE_2						SPI_CFG2_CPOL
