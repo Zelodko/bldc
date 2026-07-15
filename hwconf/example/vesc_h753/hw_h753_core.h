@@ -67,38 +67,31 @@
 #define CURRENT_FILTER_OFF()	palSetPad(CURRENT_FILTER_GPIO_PIN1, CURRENT_FILTER_PIN1);palSetPad(CURRENT_FILTER_GPIO_PIN2, CURRENT_FILTER_PIN2);palSetPad(CURRENT_FILTER_GPIO_PIN3, CURRENT_FILTER_PIN3);
 //#define CURRENT_FILTER_OFF()		palClearPad(CURRENT_FILTER_GPIO_PIN1, CURRENT_FILTER_PIN1);palClearPad(CURRENT_FILTER_GPIO_PIN2, CURRENT_FILTER_PIN2);palClearPad(CURRENT_FILTER_GPIO_PIN3, CURRENT_FILTER_PIN3);
 
-// LSM6DS3 - wired to hardware SPI1 (NSS=PA15, SCK=PB3, MISO=PB4, MOSI=PB5).
-// The LSM6DS3 multiplexes I2C onto the same 4 pins: SCK doubles as SCL and MOSI
-// doubles as SDA. Per the datasheet the chip latches its protocol from the CS/NSS
-// pin: NSS held high through the first access selects I2C, NSS driven low for a
-// SPI transaction latches SPI mode until the next power cycle. SPI is used as the
-// primary interface (LSM6DS3_USE_SPI); the I2C bit-bang path is only a fallback
-// if the SPI probe in imu_init_lsm6ds3_spi() fails.
-#define LSM6DS3_USE_SPI
-#define LSM6DS3_HWSPI_DEV       SPID1
-#define LSM6DS3_HWSPI_AF        GPIO_AF_SPI1
-#define LSM6DS3_NSS_GPIO        GPIOA
-#define LSM6DS3_NSS_PIN         15
-#define LSM6DS3_SCK_GPIO        GPIOB
-#define LSM6DS3_SCK_PIN         3
-#define LSM6DS3_MISO_GPIO       GPIOB
-#define LSM6DS3_MISO_PIN        4
-#define LSM6DS3_MOSI_GPIO       GPIOB
-#define LSM6DS3_MOSI_PIN        5
+// LSM6DS3 - wired to hardware SPI1 (NSS=PA15, SCK=PB3, MISO=PB4, MOSI=PB5), with a
+// data-ready interrupt on INT1=PC13. The LSM6DS3 multiplexes I2C onto the SPI pins
+// (SCK doubles as SCL, MOSI as SDA); IMU_FALLBACK_COM is the I2C bit-bang path taken
+// if the hardware-SPI probe in imu_init() fails.
+#define IMU_DEV					IMU_DEV_LSM6DS3
+#define IMU_COM					IMU_COM_SPI_HW
+#define IMU_SPI_DEV				SPID1
+#define IMU_SPI_AF				GPIO_AF_SPI1
+#define IMU_SPI_NSS_GPIO		GPIOA
+#define IMU_SPI_NSS_PIN			15
+#define IMU_SPI_SCK_GPIO		GPIOB
+#define IMU_SPI_SCK_PIN			3
+#define IMU_SPI_MISO_GPIO		GPIOB
+#define IMU_SPI_MISO_PIN		4
+#define IMU_SPI_MOSI_GPIO		GPIOB
+#define IMU_SPI_MOSI_PIN		5
 
-#define LSM6DS3_SCL_GPIO        GPIOB
-#define LSM6DS3_SCL_PIN         3
-#define LSM6DS3_SDA_GPIO        GPIOB
-#define LSM6DS3_SDA_PIN         5
+#define IMU_FALLBACK_COM			IMU_COM_I2C_BB
+#define IMU_FALLBACK_I2C_SCL_GPIO	GPIOB
+#define IMU_FALLBACK_I2C_SCL_PIN	3
+#define IMU_FALLBACK_I2C_SDA_GPIO	GPIOB
+#define IMU_FALLBACK_I2C_SDA_PIN	5
 
-// I2C fallback needs NSS driven high before the first access to force the chip
-// into I2C mode (no external pull-up on this board) - see hw_lsm6ds3_force_i2c_mode().
-#define LSM6DS3_I2C_MODE_SELECT() hw_lsm6ds3_force_i2c_mode()
-void hw_lsm6ds3_force_i2c_mode(void);
-
-// INT1 - not wired up/used yet, just kept out of a floating state.
-#define LSM6DS3_INT1_GPIO       GPIOC
-#define LSM6DS3_INT1_PIN        13
+#define IMU_DRDY_GPIO			GPIOC
+#define IMU_DRDY_PIN			13
 
 // ADC setup
 #define HW_ADC_NBR_CONV      4

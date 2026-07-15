@@ -97,7 +97,14 @@ void enc_bissc_deinit(BISSC_config_t *cfg) {
 void enc_bissc_routine(BISSC_config_t *cfg) {
 	if (cfg->spi_dev->state == SPI_READY) {
 		spiSelectI(cfg->spi_dev);
-		spiStartReceiveI(cfg->spi_dev, 8, (void *)cfg->state.decod_buf);
+		// spiStartExchangeI(), not spiStartReceiveI(): a receive-only DMA transfer still needs
+		// somewhere to source the dummy TX bytes that keep the clock running, and
+		// spiStartReceiveI()'s LLD (spi_lld_receive()) points that at the SPIDriver's own
+		// internal txsource field - a plain global, so also stuck in DTCM (see the .nocache
+		// comment on encoder_cfg_bissc in encoder_cfg.c). Same bug class as the one confirmed on
+		// hardware for the IMU's spiSend()/rxsink, just the TX side instead of RX. Exchanging
+		// against our own .nocache dummy_tx buffer sidesteps it.
+		spiStartExchangeI(cfg->spi_dev, 8, cfg->state.dummy_tx, cfg->state.decod_buf);
 		UTILS_LP_FAST(encoder_cfg_bissc.state.spi_comm_error_rate, 0.0, 0.0001);
 	} else {
 		++encoder_cfg_bissc.state.spi_comm_error_cnt;
@@ -106,11 +113,12 @@ void enc_bissc_routine(BISSC_config_t *cfg) {
 	}
 }
 
-// TODO: not hardware-tested. decod_buf is DMA'd into by the SPI driver, so
-// on this D-cache-enabled H7 core the CPU could otherwise read stale
-// cached bytes instead of what the DMA actually wrote. Confirm on real
-// BiSS-C hardware that this actually clears up bad/stale readings rather
-// than masking a different problem.
+// TODO: not hardware-tested. decod_buf now lives in .nocache (encoder_cfg_bissc, see
+// encoder_cfg.c), which is both DMA-reachable (the actual, more severe problem this port hit:
+// DTCM, where plain globals land by default, isn't reachable by DMA at all - the transfer errors
+// out rather than just going stale) and non-cacheable, which makes the SCB_InvalidateDCache_by_
+// Addr() call below a no-op now rather than the fix it originally looked like. Left in place as
+// a harmless no-op / defensive leftover. Confirm on real BiSS-C hardware that reads now succeed.
 void compute_bissc_callback(SPIDriver *pspi) {
 	if (pspi != NULL && pspi->app_arg != NULL) {
 		BISSC_config_t *cfg = (BISSC_config_t*)pspi->app_arg;

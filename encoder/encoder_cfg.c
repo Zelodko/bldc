@@ -139,7 +139,6 @@ ABI_config_t encoder_cfg_ABI = {
 		HW_ENC_TIM_AF,
 		HW_ENC_EXTI_PORTSRC,
 		HW_ENC_EXTI_PINSRC,
-		0, // exti_ch
 		{0, 0, 0, 0}, // State
 };
 
@@ -173,6 +172,12 @@ TS5700N8501_config_t encoder_cfg_TS5700N8501 = {
 };
 
 void enc_as5x47u_spi_callback(SPIDriver *pspi);
+// state.tx_buf/rx_buf are DMA'd into by spiStartExchangeI() in enc_as5x47u.c. Plain .bss/.data
+// on this port lands in DTCM (ld_eeprom_emu_h7.ld aliases BSS_RAM/DATA_RAM to ram5), which no
+// DMA controller on H7 can reach - confirmed on hardware for the IMU's identical setup, where it
+// produced a DMA transfer error on every access (see the .nocache comment on m_transport in
+// imu/imu.c for the full story). Untested on this encoder specifically, but same mechanism.
+__attribute__((section(".nocache")))
 AS5x47U_config_t encoder_cfg_as5x47u = {
 #ifdef HW_SPI_DEV
 		&HW_SPI_DEV, // spi_dev
@@ -205,6 +210,11 @@ AS5x47U_config_t encoder_cfg_as5x47u = {
 
 // Spi Handler for bissC
 void compute_bissc_callback(SPIDriver *pspi);
+// Same DTCM/DMA placement issue as encoder_cfg_as5x47u above - see that comment. This one also
+// has a second, independent bug: enc_bissc_routine() used spiStartReceiveI(), whose LLD routes
+// the TX side to SPID3's own internal txsource field (a plain global, so also DTCM) instead of a
+// buffer we control - fixed separately in enc_bissc.c by switching to spiStartExchangeI().
+__attribute__((section(".nocache")))
 BISSC_config_t encoder_cfg_bissc = {
 #ifdef HW_SPI_DEV
 		&HW_SPI_DEV, // spi_dev
@@ -231,7 +241,7 @@ BISSC_config_t encoder_cfg_bissc = {
 		/*MISO*/HW_SPI_PORT_MISO, HW_SPI_PIN_MISO,
 		22,   // enc_res
 		{0}, // crc
-		{0.0, 0, 0.0, 0, 0.0, 0, 0, {0}}
+		{0.0, 0, 0.0, 0, 0.0, 0, 0, {0}, {0}}
 #else
 		0,
 		{0},
@@ -242,12 +252,14 @@ BISSC_config_t encoder_cfg_bissc = {
 		0, 0,
 		22,   // enc_res
 		{0}, // crc
-		{0.0, 0, 0.0, 0, 0.0, 0, 0, {0}}
+		{0.0, 0, 0.0, 0, 0.0, 0, 0, {0}, {0}}
 #endif
 };
 
 // Spi Handler for MA782
 void compute_ma782_callback(SPIDriver *pspi);
+// Same DTCM/DMA placement issue as encoder_cfg_as5x47u above - see that comment.
+__attribute__((section(".nocache")))
 ma782_config_t encoder_cfg_ma782 = {
 #ifdef HW_SPI_DEV
 		&HW_SPI_DEV, // spi_dev

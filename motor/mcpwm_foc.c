@@ -432,9 +432,11 @@ void mcpwm_foc_init(mc_configuration *conf_m1, mc_configuration *conf_m2) {
     DMA1_Stream3->CR = 0;
 
     /* Peripheral → memory */
-    DMA1_Stream1->CR |= DMA_SxCR_MINC | DMA_SxCR_CIRC | DMA_SxCR_PL_1;
-    DMA1_Stream2->CR |= DMA_SxCR_MINC | DMA_SxCR_CIRC | DMA_SxCR_PL_1;
-    DMA1_Stream3->CR |= DMA_SxCR_MINC | DMA_SxCR_CIRC | DMA_SxCR_PL_1;
+    // PL (Very High, both priority bits set) so these ADC streams win DMA1 arbitration over
+    // other things running at a lower level (e.g. the IMU hardware-SPI transport).
+    DMA1_Stream1->CR |= DMA_SxCR_MINC | DMA_SxCR_CIRC | DMA_SxCR_PL;
+    DMA1_Stream2->CR |= DMA_SxCR_MINC | DMA_SxCR_CIRC | DMA_SxCR_PL;
+    DMA1_Stream3->CR |= DMA_SxCR_MINC | DMA_SxCR_CIRC | DMA_SxCR_PL;
 
     /* 16-bit */
     DMA1_Stream1->CR |= DMA_SxCR_PSIZE_0 | DMA_SxCR_MSIZE_0;

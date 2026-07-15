@@ -67,7 +67,6 @@ bool encoder_init(volatile mc_configuration *conf) {
 	}
 
 	// Handled by PAL
-	//nvicDisableVector(HW_ENC_EXTI_CH);
 	//nvicDisableVector(HW_ENC_TIM_ISR_CH);
 	HW_ENC_TIM_RESET();
 
@@ -389,7 +388,6 @@ void encoder_update_config(volatile mc_configuration *conf) {
 
 void encoder_deinit(void) {
 	// Handled by PAL
-	//nvicDisableVector(HW_ENC_EXTI_CH);
 	//nvicDisableVector(HW_ENC_TIM_ISR_CH);
 	HW_ENC_TIM_RESET();
 

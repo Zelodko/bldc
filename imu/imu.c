@@ -19,14 +19,19 @@
 
 #include "imu.h"
 #include "hw.h"
+#include "imu_config.h"
 #include "mpu9150.h"
 #include "ahrs.h"
 #include "timer.h"
-#include "terminal.h"
 #include "commands.h"
 #include "icm20948.h"
 #include "bmi160_wrapper.h"
 #include "lsm6ds3.h"
+#include "lsm6dsv32x.h"
+#include "transport_i2c_bb.h"
+#include "transport_spi_bb.h"
+#include "transport_spi_hw.h"
+#include "imu_thread.h"
 #include "utils_math.h"
 #include "Fusion.h"
 #include "digital_filter.h"
@@ -38,59 +43,99 @@
 static ATTITUDE_INFO m_att;
 static FusionAhrs m_fusionAhrs;
 static float m_accel[3], m_gyro[3], m_mag[3];
-static stkline_t m_thd_work_area[THD_WORKING_AREA_SIZE(1024) / sizeof(stkline_t)];
-static i2c_bb_state m_i2c_bb;
-static spi_bb_state m_spi_bb;
-static ICM20948_STATE m_icm20948_state;
-static BMI_STATE m_bmi_state;
+// m_transport.bus.spi_hw.txd/rxd are DMA source/destination buffers for transport_spi_hw.c.
+// Plain .bss/.data on this port lands in DTCM (see ld_eeprom_emu_h7.ld: BSS_RAM/DATA_RAM alias
+// to ram5), which is core-local and physically unreachable by any DMA controller on H7 - every
+// DMA transfer targeting it fails with a transfer error (confirmed on hardware: this is what was
+// tripping STM32_SPI_DMA_ERROR_HOOK's osalSysHalt("DMA failure"), which this port wires to reset
+// the MCU, producing a boot-crash-reset loop that looked like a total freeze). .nocache (ram3/
+// AXI SRAM3) is this codebase's established DMA-buffer placement, already used the same way for
+// ADC_Value in mc_interface.c.
+__attribute__((section(".nocache")))
+static transport_t m_transport;
+static imu_device_t m_dev;
 static imu_config m_settings;
 static systime_t init_time;
 static bool imu_ready;
 static Biquad acc_x_biquad, acc_y_biquad, acc_z_biquad, gyro_x_biquad, gyro_y_biquad, gyro_z_biquad;
-static char *m_imu_type_internal = "Unknown";
-
-#define SPI_BaudRatePrescaler_2         (0 << SPI_CFG1_MBR_Pos)
-#define SPI_BaudRatePrescaler_4         (1 << SPI_CFG1_MBR_Pos)
-#define SPI_BaudRatePrescaler_8         (2 << SPI_CFG1_MBR_Pos)
-#define SPI_BaudRatePrescaler_16        (3 << SPI_CFG1_MBR_Pos)
-#define SPI_BaudRatePrescaler_32        (4 << SPI_CFG1_MBR_Pos)
-#define SPI_BaudRatePrescaler_64        (5 << SPI_CFG1_MBR_Pos)
-#define SPI_BaudRatePrescaler_128       (6 << SPI_CFG1_MBR_Pos)
-#define SPI_BaudRatePrescaler_256       (7 << SPI_CFG1_MBR_Pos)
-// SPI_CFG1_DSIZE encodes bits-per-frame minus 1 (0x1F mask, "Bits number in
-// single SPI data frame" per the H7 reference manual) - not the raw bit
-// count. Using the raw count here (8, 16) configured 9-bit/17-bit frames
-// instead of 8-bit/16-bit, desynchronizing every byte boundary on the wire.
-#define SPI_DATASIZE_8BIT				7
-#define SPI_DATASIZE_16BIT				15
-#define SPI_MODE_0						0
-#define SPI_MODE_1						SPI_CFG2_CPHA
-#define SPI_MODE_2						SPI_CFG2_CPOL
-#define SPI_MODE_3						(SPI_CFG2_CPOL | SPI_CFG2_CPHA)
-
-#ifdef LSM6DS3_HWSPI_DEV
-static SPIConfig m_lsm6ds3_hw_spi_cfg = {
-		false, // Circular
-		false, // Slave
-		NULL, // data callback
-		NULL, // error callback
-		LSM6DS3_NSS_GPIO, // Port
-		LSM6DS3_NSS_PIN, // mask
-		SPI_BaudRatePrescaler_16 | SPI_DATASIZE_8BIT, // cfg 1
-		SPI_MODE_3 // cfg 2
-};
-#endif
 
 // Private functions
 static void imu_read_callback(float *accel, float *gyro, float *mag);
-static int8_t user_i2c_read(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, uint16_t len);
-static int8_t user_i2c_write(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, uint16_t len);
-static int8_t user_spi_read(uint8_t dev_id, uint8_t reg_addr, uint8_t *data, uint16_t len);
-static int8_t user_spi_write(uint8_t dev_id, uint8_t reg_addr, uint8_t *data, uint16_t len);
-static void terminal_imu_type_internal(int argc, const char **argv);
 
 // Function pointers
 static void (*m_read_callback)(float *acc, float *gyro, float *mag, float dt) = NULL;
+
+static imu_device_t imu_device_create(uint8_t dev, uint8_t com, transport_t *transport) {
+	switch (dev) {
+	case IMU_DEV_MPU9X50:
+		return mpu9150_device(transport);
+	case IMU_DEV_ICM20948:
+		return icm20948_device(transport);
+	case IMU_DEV_BMI160:
+		return bmi160_device(transport, (com == IMU_COM_SPI_BB || com == IMU_COM_SPI_HW)
+				? BMI160_SPI_INTF : BMI160_I2C_INTF);
+	case IMU_DEV_LSM6DS3:
+		return lsm6ds3_device(transport);
+	case IMU_DEV_LSM6DSV32X:
+		return lsm6dsv32x_device(transport);
+	default:
+		return (imu_device_t){0};
+	}
+}
+
+static uint8_t imu_dev_for_external(IMU_TYPE type) {
+	switch (type) {
+	case IMU_TYPE_EXTERNAL_MPU9X50:
+		return IMU_DEV_MPU9X50;
+	case IMU_TYPE_EXTERNAL_ICM20948:
+		return IMU_DEV_ICM20948;
+	case IMU_TYPE_EXTERNAL_BMI160:
+		return IMU_DEV_BMI160;
+	case IMU_TYPE_EXTERNAL_LSM6DS3:
+		return IMU_DEV_LSM6DS3;
+	case IMU_TYPE_OFF:
+	case IMU_TYPE_INTERNAL:
+		break;
+	}
+	return IMU_DEV_NONE;
+}
+
+#ifdef IMU_FALLBACK_COM
+// Bind m_transport to the board's fallback bus. A board declares IMU_FALLBACK_COM
+// plus the matching IMU_FALLBACK_* pins when it wires the IMU to a different bus
+// on some hardware revisions (see imu/imu_config.h).
+static void imu_fallback_transport_init(void) {
+#if IMU_FALLBACK_COM == IMU_COM_I2C_BB
+	transport_i2c_bb_init(&m_transport, IMU_FALLBACK_I2C_SDA_GPIO, IMU_FALLBACK_I2C_SDA_PIN,
+			IMU_FALLBACK_I2C_SCL_GPIO, IMU_FALLBACK_I2C_SCL_PIN, IMU_FALLBACK_BUS_SPEED_HZ);
+#else
+#error "IMU_FALLBACK_COM currently supports only IMU_COM_I2C_BB"
+#endif
+}
+#endif
+
+// (Re)configure the software low-pass biquads, normalizing the cutoffs to the
+// actual sample rate. A non-positive rate (no active device) leaves them untouched.
+static void configure_biquads(float rate_hz) {
+	if (rate_hz <= 0) {
+		return;
+	}
+	if (m_settings.accel_lowpass_filter_x > 0) {
+		biquad_config(&acc_x_biquad, BQ_LOWPASS, m_settings.accel_lowpass_filter_x / rate_hz);
+	}
+	if (m_settings.accel_lowpass_filter_y > 0) {
+		biquad_config(&acc_y_biquad, BQ_LOWPASS, m_settings.accel_lowpass_filter_y / rate_hz);
+	}
+	if (m_settings.accel_lowpass_filter_z > 0) {
+		biquad_config(&acc_z_biquad, BQ_LOWPASS, m_settings.accel_lowpass_filter_z / rate_hz);
+	}
+	if (m_settings.gyro_lowpass_filter > 0) {
+		float fc = m_settings.gyro_lowpass_filter / rate_hz;
+		biquad_config(&gyro_x_biquad, BQ_LOWPASS, fc);
+		biquad_config(&gyro_y_biquad, BQ_LOWPASS, fc);
+		biquad_config(&gyro_z_biquad, BQ_LOWPASS, fc);
+	}
+}
 
 void imu_init(imu_config *set) {
 	bool imu_changed = set->sample_rate_hz != m_settings.sample_rate_hz ||
@@ -98,112 +143,83 @@ void imu_init(imu_config *set) {
 
 	m_settings = *set;
 
-	//Biquad filters
-	float fc;
-	if(m_settings.accel_lowpass_filter_x > 0){
-		fc = m_settings.accel_lowpass_filter_x / m_settings.sample_rate_hz;
-		biquad_config(&acc_x_biquad, BQ_LOWPASS, fc);
-	}
-	if(m_settings.accel_lowpass_filter_y > 0){
-		fc = m_settings.accel_lowpass_filter_y / m_settings.sample_rate_hz;
-		biquad_config(&acc_y_biquad, BQ_LOWPASS, fc);
-	}
-	if(m_settings.accel_lowpass_filter_z > 0){
-		fc = m_settings.accel_lowpass_filter_z / m_settings.sample_rate_hz;
-		biquad_config(&acc_z_biquad, BQ_LOWPASS, fc);
-	}
-	if(m_settings.gyro_lowpass_filter > 0){
-		fc = m_settings.gyro_lowpass_filter / m_settings.sample_rate_hz;
-		biquad_config(&gyro_x_biquad, BQ_LOWPASS, fc);
-		biquad_config(&gyro_y_biquad, BQ_LOWPASS, fc);
-		biquad_config(&gyro_z_biquad, BQ_LOWPASS, fc);
-	}
-
 	if (!imu_changed) {
+		// The device is unchanged, only the biquad cutoffs may have changed.
+		configure_biquads(m_dev.sample_rate_hz);
 		return;
 	}
 
 	imu_stop();
 	imu_reset_orientation();
 
-	mpu9150_set_mag_enabled(set->use_magnetometer);
-	mpu9150_set_rate_hz(MIN(set->sample_rate_hz, 1000));
-	m_icm20948_state.rate_hz = MIN(set->sample_rate_hz, 1000);
-	m_bmi_state.rate_hz = set->sample_rate_hz;
-	lsm6ds3_set_rate_hz(set->sample_rate_hz);
-
-	m_bmi_state.filter = set->filter;
-	lsm6ds3_set_filter(set->filter);
+	// Resolve the active (device, transport) pair: the internal IMU from
+	// compile-time board macros, an external IMU from the runtime type.
+	uint8_t dev = IMU_DEV_NONE;
+	uint8_t com = IMU_COM_NONE;
 
 	if (set->type == IMU_TYPE_INTERNAL) {
-#ifdef MPU9X50_SDA_GPIO
-		imu_init_mpu9x50();
-		m_imu_type_internal = "MPU9X50";
-#endif
+#if IMU_DEV != IMU_DEV_NONE
+		dev = IMU_DEV;
+		com = IMU_COM;
 
-#ifdef ICM20948_SDA_GPIO
-		imu_init_icm20948(ICM20948_AD0_VAL);
-		m_imu_type_internal = "ICM20948";
+#if IMU_COM == IMU_COM_I2C_BB
+		transport_i2c_bb_init(&m_transport, IMU_I2C_SDA_GPIO, IMU_I2C_SDA_PIN,
+				IMU_I2C_SCL_GPIO, IMU_I2C_SCL_PIN, IMU_BUS_SPEED_HZ);
+#elif IMU_COM == IMU_COM_SPI_BB
+		transport_spi_bb_init(&m_transport, IMU_SPI_NSS_GPIO, IMU_SPI_NSS_PIN,
+				IMU_SPI_SCK_GPIO, IMU_SPI_SCK_PIN, IMU_SPI_MOSI_GPIO, IMU_SPI_MOSI_PIN,
+				IMU_SPI_MISO_GPIO, IMU_SPI_MISO_PIN);
+#elif IMU_COM == IMU_COM_SPI_HW
+		transport_spi_hw_init(&m_transport, &IMU_SPI_DEV, IMU_SPI_AF,
+				IMU_SPI_NSS_GPIO, IMU_SPI_NSS_PIN, IMU_SPI_SCK_GPIO, IMU_SPI_SCK_PIN,
+				IMU_SPI_MOSI_GPIO, IMU_SPI_MOSI_PIN, IMU_SPI_MISO_GPIO, IMU_SPI_MISO_PIN,
+				IMU_BUS_SPEED_HZ);
+#elif IMU_COM == IMU_COM_I2C_BB_SPI
+		// LSM6DS3 wired to the SPI pins but driven as bit-bang I2C: park NSS high and MISO low, then
+		// run I2C with SDA on the MOSI pin and SCL on the SCK pin.
+		palSetPadMode(IMU_SPI_NSS_GPIO, IMU_SPI_NSS_PIN, PAL_MODE_OUTPUT_PUSHPULL);
+		palSetPad(IMU_SPI_NSS_GPIO, IMU_SPI_NSS_PIN);
+		palSetPadMode(IMU_SPI_MISO_GPIO, IMU_SPI_MISO_PIN, PAL_MODE_OUTPUT_PUSHPULL);
+		palClearPad(IMU_SPI_MISO_GPIO, IMU_SPI_MISO_PIN);
+		transport_i2c_bb_init(&m_transport, IMU_SPI_MOSI_GPIO, IMU_SPI_MOSI_PIN,
+				IMU_SPI_SCK_GPIO, IMU_SPI_SCK_PIN, IMU_BUS_SPEED_HZ);
 #endif
-
-#ifdef BMI160_SDA_GPIO
-		imu_init_bmi160_i2c();
-		m_imu_type_internal = "BMI160";
-#endif
-
-#if defined(LSM6DS3_SDA_GPIO) && !defined(LSM6DS3_USE_SPI)
-		imu_init_lsm6ds3();
-		m_imu_type_internal = "LSM6DS3_I2C";
-#endif
-
-#ifdef LSM6DS3_USE_SPI
-#ifdef LSM6DS3_NSS_GPIO
-		if (imu_init_lsm6ds3_spi(
-				LSM6DS3_NSS_GPIO, LSM6DS3_NSS_PIN,
-				LSM6DS3_SCK_GPIO, LSM6DS3_SCK_PIN,
-				LSM6DS3_MOSI_GPIO, LSM6DS3_MOSI_PIN,
-				LSM6DS3_MISO_GPIO, LSM6DS3_MISO_PIN)) {
-#ifdef LSM6DS3_HWSPI_DEV
-			m_imu_type_internal = "LSM6DS3_SPI_HW";
-#else
-			m_imu_type_internal = "LSM6DS3_SPI";
-#endif
-		} else {
-			// I2C fallback
-#if defined(LSM6DS3_SDA_GPIO)
-#ifdef LSM6DS3_I2C_MODE_SELECT
-			LSM6DS3_I2C_MODE_SELECT();
-#endif
-			imu_init_lsm6ds3();
-			m_imu_type_internal = "LSM6DS3_I2C";
-#endif
+#endif // IMU_DEV != IMU_DEV_NONE
+	} else {
+		dev = imu_dev_for_external(set->type);
+		if (dev != IMU_DEV_NONE) {
+			com = IMU_COM_I2C_BB;
+			transport_i2c_bb_init(&m_transport, HW_I2C_SDA_PORT, HW_I2C_SDA_PIN,
+					HW_I2C_SCL_PORT, HW_I2C_SCL_PIN, 0);
 		}
-#endif
-#endif
-
-#ifdef BMI160_SPI_PORT_NSS
-		imu_init_bmi160_spi(
-				BMI160_SPI_PORT_NSS, BMI160_SPI_PIN_NSS,
-				BMI160_SPI_PORT_SCK, BMI160_SPI_PIN_SCK,
-				BMI160_SPI_PORT_MOSI, BMI160_SPI_PIN_MOSI,
-				BMI160_SPI_PORT_MISO, BMI160_SPI_PIN_MISO);
-		m_imu_type_internal = "BMI160_SPI";
-#endif
-	} else if (set->type == IMU_TYPE_EXTERNAL_MPU9X50) {
-		imu_init_mpu9x50();
-	} else if (set->type == IMU_TYPE_EXTERNAL_ICM20948) {
-		imu_init_icm20948(0);
-	} else if (set->type == IMU_TYPE_EXTERNAL_BMI160) {
-		imu_init_bmi160_i2c();
-	} else if(set->type == IMU_TYPE_EXTERNAL_LSM6DS3) {
-		imu_init_lsm6ds3();
 	}
 
-	terminal_register_command_callback(
-			"imu_type_internal",
-			"Print internal IMU type",
-			0,
-			terminal_imu_type_internal);
+	if (dev != IMU_DEV_NONE) {
+		m_dev = imu_device_create(dev, com, &m_transport);
+		uint16_t rate_hz = MIN(m_settings.sample_rate_hz, transport_max_sample_rate(&m_transport));
+		imu_thread_set_device(&m_dev, rate_hz);
+		bool configured = m_dev.interface->configure(&m_dev, m_settings.filter, m_settings.use_magnetometer);
+
+#ifdef IMU_FALLBACK_COM
+		if (!configured) {
+			// No response on the primary bus. Some hardware revisions wire the
+			// same IMU to a different bus, so re-bind to the fallback transport
+			// and try once more.
+			commands_printf("IMU: no response on primary bus, trying fallback");
+			imu_fallback_transport_init();
+			com = IMU_FALLBACK_COM;
+			m_dev = imu_device_create(dev, com, &m_transport);
+			rate_hz = MIN(m_settings.sample_rate_hz, transport_max_sample_rate(&m_transport));
+			imu_thread_set_device(&m_dev, rate_hz);
+			configured = m_dev.interface->configure(&m_dev, m_settings.filter, m_settings.use_magnetometer);
+		}
+#endif
+
+		if (configured) {
+			configure_biquads(m_dev.sample_rate_hz);
+			imu_thread_start(imu_read_callback);
+		}
+	}
 }
 
 void imu_reset_orientation(void) {
@@ -214,125 +230,15 @@ void imu_reset_orientation(void) {
 	ahrs_update_all_parameters(&m_att, 1.0, 10.0, 0.0, 2.0);
 }
 
-void imu_init_mpu9x50() {
-	imu_stop();
-
-	mpu9150_init(m_thd_work_area, sizeof(m_thd_work_area));
-	mpu9150_set_read_callback(imu_read_callback);
-}
-
-void imu_init_icm20948(int ad0_val) {
-	imu_stop();
-
-	icm20948_init(&m_icm20948_state, ad0_val, m_thd_work_area, sizeof(m_thd_work_area));
-	icm20948_set_read_callback(&m_icm20948_state, imu_read_callback);
-}
-
-void imu_init_bmi160_i2c() {
-	imu_stop();
-
-	m_bmi_state.sensor.id = BMI160_I2C_ADDR;
-	m_bmi_state.sensor.interface = BMI160_I2C_INTF;
-	m_bmi_state.sensor.read = user_i2c_read;
-	m_bmi_state.sensor.write = user_i2c_write;
-
-	bmi160_wrapper_init(&m_bmi_state, m_thd_work_area, sizeof(m_thd_work_area));
-	bmi160_wrapper_set_read_callback(&m_bmi_state, imu_read_callback);
-}
-
-void imu_init_bmi160_spi(stm32_gpio_t *nss_gpio, int nss_pin,
-		stm32_gpio_t *sck_gpio, int sck_pin, stm32_gpio_t *mosi_gpio, int mosi_pin,
-		stm32_gpio_t *miso_gpio, int miso_pin) {
-	imu_stop();
-
-	m_spi_bb.nss_gpio = nss_gpio;
-	m_spi_bb.nss_pin = nss_pin;
-	m_spi_bb.sck_gpio = sck_gpio;
-	m_spi_bb.sck_pin = sck_pin;
-	m_spi_bb.mosi_gpio = mosi_gpio;
-	m_spi_bb.mosi_pin = mosi_pin;
-	m_spi_bb.miso_gpio = miso_gpio;
-	m_spi_bb.miso_pin = miso_pin;
-
-	spi_bb_init(&m_spi_bb);
-
-	m_bmi_state.sensor.id = 0;
-	m_bmi_state.sensor.interface = BMI160_SPI_INTF;
-	m_bmi_state.sensor.read = user_spi_read;
-	m_bmi_state.sensor.write = user_spi_write;
-
-	bmi160_wrapper_init(&m_bmi_state, m_thd_work_area, sizeof(m_thd_work_area));
-
-	bmi160_wrapper_set_read_callback(&m_bmi_state, imu_read_callback);
-}
-
-void imu_init_lsm6ds3() {
-	imu_stop();
-
-	m_i2c_bb.sda_gpio = LSM6DS3_SDA_GPIO;
-	m_i2c_bb.sda_pin = LSM6DS3_SDA_PIN;
-	m_i2c_bb.scl_gpio = LSM6DS3_SCL_GPIO;
-	m_i2c_bb.scl_pin = LSM6DS3_SCL_PIN;
-
-#ifdef LSM6DS3_SPEED_700KHZ
-	m_i2c_bb.rate = I2C_BB_RATE_700K;
-	commands_printf("LSM6DS3 speed: 700 kHz");
-#else
-	m_i2c_bb.rate = I2C_BB_RATE_400K;
-	commands_printf("LSM6DS3 speed: 400 kHz");
-#endif
-
-	i2c_bb_init(&m_i2c_bb);
-
-	lsm6ds3_init(&m_i2c_bb, NULL, NULL, m_thd_work_area, sizeof(m_thd_work_area));
-	lsm6ds3_set_read_callback(imu_read_callback);
-}
-
-bool imu_init_lsm6ds3_spi(stm32_gpio_t *nss_gpio, int nss_pin,
-		stm32_gpio_t *sck_gpio, int sck_pin, stm32_gpio_t *mosi_gpio, int mosi_pin,
-		stm32_gpio_t *miso_gpio, int miso_pin) {
-	imu_stop();
-
-#ifdef LSM6DS3_HWSPI_DEV
-	palSetPadMode(nss_gpio, nss_pin,
-			PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST);
-	palSetPadMode(sck_gpio, sck_pin,
-			PAL_MODE_ALTERNATE(LSM6DS3_HWSPI_AF) | PAL_STM32_OSPEED_HIGHEST);
-	palSetPadMode(mosi_gpio, mosi_pin,
-			PAL_MODE_ALTERNATE(LSM6DS3_HWSPI_AF) | PAL_STM32_OSPEED_HIGHEST);
-	palSetPadMode(miso_gpio, miso_pin,
-			PAL_MODE_ALTERNATE(LSM6DS3_HWSPI_AF) | PAL_STM32_OSPEED_HIGHEST | PAL_STM32_PUPDR_FLOATING);
-
-	spiStart(&LSM6DS3_HWSPI_DEV, &m_lsm6ds3_hw_spi_cfg);
-
-	bool res = lsm6ds3_init(NULL, NULL, &LSM6DS3_HWSPI_DEV, m_thd_work_area, sizeof(m_thd_work_area));
-#else
-	m_spi_bb.nss_gpio = nss_gpio;
-	m_spi_bb.nss_pin = nss_pin;
-	m_spi_bb.sck_gpio = sck_gpio;
-	m_spi_bb.sck_pin = sck_pin;
-	m_spi_bb.mosi_gpio = mosi_gpio;
-	m_spi_bb.mosi_pin = mosi_pin;
-	m_spi_bb.miso_gpio = miso_gpio;
-	m_spi_bb.miso_pin = miso_pin;
-
-	spi_bb_init(&m_spi_bb);
-	bool res = lsm6ds3_init(NULL, &m_spi_bb, NULL, m_thd_work_area, sizeof(m_thd_work_area));
-#endif
-
-	lsm6ds3_set_read_callback(imu_read_callback);
-
-	return res;
+i2c_bb_state *imu_get_i2c(void) {
+	return &m_transport.bus.i2c_bb;
 }
 
 void imu_stop(void) {
-	mpu9150_stop();
-	icm20948_stop(&m_icm20948_state);
-	bmi160_wrapper_stop(&m_bmi_state);
-	lsm6ds3_stop();
+	imu_thread_stop();
 
-#ifdef LSM6DS3_HWSPI_DEV
-	spiStop(&LSM6DS3_HWSPI_DEV);
+#if IMU_COM == IMU_COM_SPI_HW
+	spiStop(&IMU_SPI_DEV);
 #endif
 }
 
@@ -558,6 +464,8 @@ static void imu_read_callback(float *accel, float *gyro, float *mag) {
 	last_time = timer_time_now();
 	chSysUnlock();
 
+	// ST2MS doesn't exist in this ChibiOS version - TIME_I2MS is the equivalent for a
+	// systime_t tick delta (see the same fix already applied elsewhere in this port).
 	if (!imu_ready && TIME_I2MS(chVTGetSystemTimeX() - init_time) > 1000) {
 		ahrs_update_all_parameters(
 				&m_att,
@@ -711,68 +619,4 @@ static void imu_read_callback(float *accel, float *gyro, float *mag) {
 	if (m_read_callback) {
 		m_read_callback(m_accel, gyro_rad, m_mag, dt);
 	}
-}
-
-static int8_t user_i2c_read(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, uint16_t len) {
-    uint8_t txbuf[1];
-    txbuf[0] = reg_addr;
-
-    // Use hardware I2C
-    return hw_i2c_tx_rx(dev_addr, txbuf, 1, data, len) ? BMI160_OK : BMI160_E_COM_FAIL;
-}
-
-static int8_t user_i2c_write(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, uint16_t len) {
-    uint8_t txbuf[len + 1];
-    txbuf[0] = reg_addr;
-    memcpy(txbuf + 1, data, len);
-
-    // Use hardware I2C
-    return hw_i2c_tx_rx(dev_addr, txbuf, len + 1, 0, 0) ? BMI160_OK : BMI160_E_COM_FAIL;
-}
-
-static int8_t user_spi_read(uint8_t dev_id, uint8_t reg_addr, uint8_t *data, uint16_t len) {
-	(void)dev_id;
-	
-	int8_t rslt = BMI160_OK; // Return 0 for Success, non-zero for failure 
-
-	reg_addr = (reg_addr | BMI160_SPI_RD_MASK);
-
-	chMtxLock(&m_spi_bb.mutex);
-	spi_bb_begin(&m_spi_bb);
-	spi_bb_exchange_8(&m_spi_bb, reg_addr);
-	spi_bb_delay();
-
-	for (int i = 0; i < len; i++) {
-		data[i] = spi_bb_exchange_8(&m_spi_bb, 0);
-	}
-
-	spi_bb_end(&m_spi_bb);
-	chMtxUnlock(&m_spi_bb.mutex);
-	return rslt;
-}
-
-static int8_t user_spi_write(uint8_t dev_id, uint8_t reg_addr, uint8_t *data, uint16_t len) {
-	(void)dev_id;
-
-	int8_t rslt = BMI160_OK; /* Return 0 for Success, non-zero for failure */
-	chMtxLock(&m_spi_bb.mutex);
-	spi_bb_begin(&m_spi_bb);
-	reg_addr = (reg_addr & BMI160_SPI_WR_MASK);
-	spi_bb_exchange_8(&m_spi_bb, reg_addr);
-	spi_bb_delay();
-
-	for (int i = 0; i < len; i++) {
-		spi_bb_exchange_8(&m_spi_bb, *data);
-		data++;
-	}
-
-	spi_bb_end(&m_spi_bb);
-	chMtxUnlock(&m_spi_bb.mutex);
-
-	return rslt;
-}
-
-static void terminal_imu_type_internal(int argc, const char **argv) {
-	(void)argc;(void)argv;
-	commands_printf(m_imu_type_internal);
 }

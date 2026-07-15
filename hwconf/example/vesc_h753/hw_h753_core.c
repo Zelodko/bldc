@@ -252,10 +252,11 @@ void hw_init_gpio(void) {
 	palSetPadMode(HW_SHUTDOWN_SENSE_GPIO, HW_SHUTDOWN_SENSE_PIN, PAL_MODE_INPUT);
 	HW_SHUTDOWN_HOLD_ON();
 
-	// LSM6DS3 INT1 - not used yet, just kept out of a floating state.
-	// NSS/SCK/MISO/MOSI are left alone here: imu_init_lsm6ds3_spi() configures
+	// LSM6DS3 DRDY (INT1) - kept out of a floating state here; drdy_init() sets its
+	// real mode (also PAL_MODE_INPUT_PULLDOWN) once the IMU thread actually starts.
+	// NSS/SCK/MISO/MOSI are left alone here: transport_spi_hw_init() configures
 	// them for hardware SPI1 when the IMU is actually initialized.
-	palSetPadMode(LSM6DS3_INT1_GPIO, LSM6DS3_INT1_PIN, PAL_MODE_INPUT_PULLDOWN);
+	palSetPadMode(IMU_DRDY_GPIO, IMU_DRDY_PIN, PAL_MODE_INPUT_PULLDOWN);
 
 //	INIT_BR();
 
@@ -579,20 +580,6 @@ bool hw_i2c_tx_rx(uint8_t dev_addr,
 
     i2cReleaseBus(&HW_I2C_DEV);
     return res;
-}
-
-/**
- * Force the LSM6DS3 to select the I2C protocol on its shared NSS/SCK/MISO/MOSI
- * pins. Per the datasheet the chip latches its interface from the CS/NSS pin
- * state: NSS held high through the first access after power-up selects I2C,
- * while a CS-low SPI transaction latches SPI mode until the next power cycle.
- * There's no external pull-up on NSS on this board, so this has to be driven
- * explicitly before the I2C bit-bang fallback in imu_init_lsm6ds3() runs.
- */
-void hw_lsm6ds3_force_i2c_mode(void) {
-	palSetPadMode(LSM6DS3_NSS_GPIO, LSM6DS3_NSS_PIN,
-			PAL_MODE_OUTPUT_PUSHPULL | PAL_STM32_OSPEED_HIGHEST);
-	palSetPad(LSM6DS3_NSS_GPIO, LSM6DS3_NSS_PIN);
 }
 
 static void terminal_button_test(int argc, const char **argv) {

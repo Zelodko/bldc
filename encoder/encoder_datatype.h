@@ -144,7 +144,6 @@ typedef struct {
 
 	ioportid_t exti_portsrc;
 	iopadid_t exti_pinsrc;
-	uint32_t exti_ch;
 
 	ABI_state state;
 } ABI_config_t;
@@ -289,6 +288,10 @@ typedef struct {
 	uint32_t spi_val;
 	uint32_t last_update_time;
 	uint8_t decod_buf[8];
+	// All-zero TX content for the exchange that clocks decod_buf in - the BiSS-C slave doesn't
+	// sample MOSI during a read, so the value doesn't matter, only that it's a real DMA-safe
+	// buffer (see enc_bissc.c's enc_bissc_routine()).
+	uint8_t dummy_tx[8];
 } BISSC_state;
 
 typedef struct {
