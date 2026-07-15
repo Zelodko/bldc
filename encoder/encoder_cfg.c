@@ -34,8 +34,25 @@ static THD_WORKING_AREA(encoder_thread_wa, 256);
 #define SPI_BaudRatePrescaler_64        (5 << SPI_CFG1_MBR_Pos)
 #define SPI_BaudRatePrescaler_128       (6 << SPI_CFG1_MBR_Pos)
 #define SPI_BaudRatePrescaler_256       (7 << SPI_CFG1_MBR_Pos)
-#define SPI_DATASIZE_8BIT				8
-#define SPI_DATASIZE_16BIT				16
+// SPI_CFG1_DSIZE encodes bits-per-frame minus 1 (0x1F mask, "Bits number in
+// single SPI data frame" per the H7 reference manual) - not the raw bit
+// count. The raw counts here (8, 16) configured 9-bit/17-bit frames instead
+// of 8-bit/16-bit, desynchronizing every byte boundary on the wire - same
+// bug as the one found and fixed in imu/imu.c for the LSM6DS3, fixed here
+// the same way. Untested on real hardware.
+//
+// MT6816 only ever uses spiPolledExchange() so this fix should be safe and
+// self-contained there. AS5x47U, BISS-C, and MA782's periodic read all use
+// spiStartExchangeI()/spiStartReceiveI() (DMA-driven, not polled) - fixing
+// this may, for the first time, let SPI communication actually succeed for
+// them, which is exactly what exposed a DMA-vs-CAN-thread freeze for the
+// IMU once its own SPI communication started working (see lsm6ds3.c's
+// read_gyro_accel() and the polled-exchange fix there). If one of these
+// three hangs instead of just returning garbage after this fix, that freeze
+// is the first thing to check - the fix there was switching the DMA
+// exchange to a polled one.
+#define SPI_DATASIZE_8BIT				7
+#define SPI_DATASIZE_16BIT				15
 
 AS504x_config_t encoder_cfg_as504x = {
 		{

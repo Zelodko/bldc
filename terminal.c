@@ -120,6 +120,18 @@ void terminal_process_string(char *str) {
 		thread_t *tp;
 		static const char *states[] = {CH_STATE_NAMES};
 		static systime_t last_check_time = 0;
+		// Sampled once, before the loop, rather than calling chVTGetSystemTimeX()
+		// fresh inside each printf below. Every commands_printf() takes real time
+		// to transmit, and each thread's tp->time gets reset the moment its own
+		// line is printed - so a fresh timestamp per row would keep drifting
+		// later relative to when that row's own counter was actually last reset,
+		// while last_check_time (previously only updated after the whole table
+		// had printed) stays fixed at an even later point than any individual
+		// reset. That mismatched a too-small elapsed time against a correct
+		// tp->time numerator, inflating every percentage - worst for rows near
+		// the top of the list, where the gap was largest.
+		systime_t now = chVTGetSystemTimeX();
+		systime_t elapsed = now - last_check_time;
 		commands_printf("    addr    stack prio refs     state           name motor stackmin  time    ");
 		commands_printf("-----------------------------------------------------------------------------");
 		tp = chRegFirstThread();
@@ -129,11 +141,11 @@ void terminal_process_string(char *str) {
 					(uint32_t)tp, (uint32_t)tp->wabase,
 					(uint32_t)tp->realprio, (uint32_t)(tp->refs - 1),
 					states[tp->state], tp->name, tp->motor_selected, stack_left, (uint32_t)tp->time,
-					(double)(100.0 * (float)tp->time / (float)(chVTGetSystemTimeX() - last_check_time)));
+					(double)(100.0 * (float)tp->time / (float)elapsed));
 			tp->time = 0;
 			tp = chRegNextThread(tp);
 		} while (tp != NULL);
-		last_check_time = chVTGetSystemTimeX();
+		last_check_time = now;
 		commands_printf(" ");
 	} else if (strcmp(argv[0], "fault") == 0) {
 		commands_printf("%s\n", mc_interface_fault_to_string(mc_interface_get_fault()));
