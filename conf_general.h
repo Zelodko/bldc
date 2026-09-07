@@ -220,6 +220,7 @@ extern foc_profile g_foc_profile;
 
 // Functions
 void conf_general_init(void);
+uint16_t conf_general_eeprom_init_status(void);
 bool conf_general_store_backup_data(void);
 bool conf_general_read_eeprom_var_hw(eeprom_var *v, int address);
 bool conf_general_read_eeprom_var_custom(eeprom_var *v, int address);

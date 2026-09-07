@@ -416,7 +416,9 @@ flash_error_t HAL_FLASH_Program(uint32_t FlashAddress,
 		__DSB();
 
 		/* Wait for last operation to be completed */
-		status = FLASH_WaitForLastOperation(bank);
+		if (status == FLASH_NO_ERROR) {
+			status = FLASH_WaitForLastOperation(bank);
+		}
 		{
 			if (bank == FLASH_BANK_1) {
 				/* If the program operation is completed, disable the PG */

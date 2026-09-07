@@ -56,6 +56,11 @@
 // Global variables
 uint16_t VirtAddVarTab[NB_OF_VAR];
 bool conf_general_permanent_nrf_found = false;
+static uint16_t eeprom_init_status;
+
+uint16_t conf_general_eeprom_init_status(void) {
+	return eeprom_init_status;
+}
 __attribute__((section(".ram4"))) volatile backup_data g_backup;
 
 // Private functions
@@ -70,6 +75,12 @@ void conf_general_init(void) {
 	for (unsigned int i = 0;i < (sizeof(mc_configuration) / 2);i++) {
 		VirtAddVarTab[ind++] = EEPROM_BASE_MCCONF + i;
 	}
+
+#ifdef HW_HAS_DUAL_MOTORS
+	for (unsigned int i = 0;i < (sizeof(mc_configuration) / 2);i++) {
+		VirtAddVarTab[ind++] = EEPROM_BASE_MCCONF_2 + i;
+	}
+#endif
 
 	for (unsigned int i = 0;i < (sizeof(app_configuration) / 2);i++) {
 		VirtAddVarTab[ind++] = EEPROM_BASE_APPCONF + i;
@@ -88,7 +99,7 @@ void conf_general_init(void) {
 	}
 
 	HAL_FLASH_Unlock();
-	EE_Init();
+	eeprom_init_status = EE_Init();
 	HAL_FLASH_Lock();
 
 	// Read backup data
@@ -146,7 +157,9 @@ void conf_general_init(void) {
 	backup_tmp.can_init_flag = BACKUP_VAR_INIT_CODE;
 
 	g_backup = backup_tmp;
-	conf_general_store_backup_data();
+	if (eeprom_init_status == FLASH_NO_ERROR) {
+		conf_general_store_backup_data();
+	}
 }
 
 /*
@@ -401,9 +414,11 @@ bool conf_general_store_app_configuration(app_configuration *conf) {
 	mc_interface_ignore_input_both(100);
 	utils_sys_unlock_cnt();
 
-	g_backup.can_id = conf->controller_id;
-	g_backup.can_baud = conf->can_baud_rate;
-	conf_general_store_backup_data();
+	if (is_ok) {
+		g_backup.can_id = conf->controller_id;
+		g_backup.can_baud = conf->can_baud_rate;
+		is_ok = conf_general_store_backup_data();
+	}
 
 	return is_ok;
 }

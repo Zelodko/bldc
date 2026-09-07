@@ -611,6 +611,7 @@ void terminal_process_string(char *str) {
 			commands_printf("DC Cal Failed: %d\n", res);
 		}
 	} else if (strcmp(argv[0], "hw_status") == 0) {
+		commands_printf("EEPROM init status: %u (0 = OK)", conf_general_eeprom_init_status());
 		commands_printf("Firmware: %d.%d", FW_VERSION_MAJOR, FW_VERSION_MINOR);
 #ifdef HW_NAME
 		commands_printf("Hardware: %s", HW_NAME);

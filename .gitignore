@@ -21,3 +21,5 @@ zesc200200gan Default (1).cfg
 .vscode
 *.launch
 *.prefs
+
+/tests/eeprom/

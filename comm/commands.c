@@ -571,7 +571,11 @@ void commands_process_packet(unsigned char *data, unsigned int len,
 			}
 
 			commands_apply_mcconf_hw_limits(mcconf);
-			conf_general_store_mc_configuration(mcconf, mc_interface_get_motor_thread() == 2);
+			if (!conf_general_store_mc_configuration(mcconf, mc_interface_get_motor_thread() == 2)) {
+				commands_printf("Error: Motor configuration was not saved to flash");
+				mempools_free_mcconf(mcconf);
+				break; // Do not acknowledge a failed persistent write.
+			}
 			mc_interface_set_configuration(mcconf);
 			chThdSleepMilliseconds(200);
 
@@ -630,7 +634,11 @@ void commands_process_packet(unsigned char *data, unsigned int len,
 			commands_apply_appconf_hw_limits(appconf);
 
 			if (packet_id == COMM_SET_APPCONF) {
-				conf_general_store_app_configuration(appconf);
+				if (!conf_general_store_app_configuration(appconf)) {
+					commands_printf("Error: App configuration was not saved to flash");
+					mempools_free_appconf(appconf);
+					break;
+				}
 			}
 
 			app_set_configuration(appconf);
