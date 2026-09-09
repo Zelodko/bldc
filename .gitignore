@@ -23,3 +23,9 @@ zesc200200gan Default (1).cfg
 *.prefs
 
 /tests/eeprom/
+
+# Local H7 ADC investigation files
+/documentation/h7_adc_diagnostics.md
+/documentation/h7_adc_timing_review.md
+/motor/foc_adc_diag.c
+/motor/foc_adc_diag.h

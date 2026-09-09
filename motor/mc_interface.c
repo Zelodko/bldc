@@ -23,6 +23,7 @@
 #include "mc_interface.h"
 #include "mcpwm.h"
 #include "mcpwm_foc.h"
+#include "foc_sample.h"
 #include "ledpwm.h"
 
 #include "hw.h"
@@ -124,6 +125,7 @@ static volatile int m_sample_len;
 static volatile int m_sample_int;
 static volatile bool m_sample_raw;
 static volatile debug_sampling_mode m_sample_mode;
+static volatile bool m_sample_capture_failed;
 static volatile debug_sampling_mode m_sample_mode_last;
 static volatile int m_sample_offset_last;
 static volatile int m_sample_now;
@@ -1514,19 +1516,30 @@ void mc_interface_sample_print_data(debug_sampling_mode mode, uint16_t len, uint
 	}
 
 	if (mode == DEBUG_SAMPLING_SEND_LAST_SAMPLES) {
+		if (m_sample_capture_failed) {
+			commands_printf("Error: ADC sample capture was aborted; start a new capture.");
+			return;
+		}
 		chEvtSignal(sample_send_tp, (eventmask_t) 1);
 	} else if (mode == DEBUG_SAMPLING_SEND_SINGLE_SAMPLE) {
+		if (m_sample_capture_failed) {
+			commands_printf("Error: ADC sample capture was aborted; start a new capture.");
+			return;
+		}
 		send_sample_block(len, m_sample_offset_last);
 	} else {
+		utils_sys_lock_cnt();
+		m_sample_capture_failed = false;
 		m_sample_trigger = -1;
 		m_sample_now = 0;
 		m_sample_len = len;
 		m_sample_int = decimation;
-		m_sample_mode = mode;
 		m_sample_raw = raw;
 #ifdef HW_HAS_DUAL_MOTORS
 		m_sample_is_second_motor = motor_now() == &m_motor_2;
 #endif
+		m_sample_mode = mode;
+		utils_sys_unlock_cnt();
 	}
 }
 
@@ -1873,6 +1886,11 @@ void mc_interface_fault_stop(mc_fault_code fault, bool is_second_motor, bool is_
 
 //#pragma GCC pop_options
 __attribute__((section(".itcm_text")))
+bool mc_interface_sample_capture_active(void) {
+	return m_sample_mode != DEBUG_SAMPLING_OFF;
+}
+
+__attribute__((section(".itcm_text")))
 void mc_interface_mc_timer_isr(bool is_second_motor, float dt) {
 	ledpwm_update_pwm();
 
@@ -2135,17 +2153,32 @@ void mc_interface_mc_timer_isr(bool is_second_motor, float dt) {
 			}
 
 			int16_t zero;
+			int voltage_sample[3];
 			if (conf_now->motor_type == MOTOR_TYPE_FOC) {
-				if (is_second_motor) {
-					zero = (ADC_V_L4 + ADC_V_L5 + ADC_V_L6) / 3;
-				} else {
-					zero = (ADC_V_L1 + ADC_V_L2 + ADC_V_L3) / 3;
+				if (!foc_sample_get_voltage(voltage_sample, is_second_motor)) {
+					m_sample_capture_failed = true;
+					m_sample_mode = DEBUG_SAMPLING_OFF;
+					m_sample_mode_last = DEBUG_SAMPLING_OFF;
+					chSysLockFromISR();
+					chEvtSignalI(sample_send_tp, (eventmask_t) 2);
+					chSysUnlockFromISR();
+					return;
 				}
+				zero = (voltage_sample[0] + voltage_sample[1] + voltage_sample[2]) / 3;
 				m_phase_samples[m_sample_now] = (uint8_t)(mcpwm_foc_get_phase() / 360.0 * 250.0);
 //				m_phase_samples[m_sample_now] = (uint8_t)(mcpwm_foc_get_phase_observer() / 360.0 * 250.0);
 //				float ang = utils_angle_difference(mcpwm_foc_get_phase_observer(), mcpwm_foc_get_phase_encoder()) + 180.0;
 //				m_phase_samples[m_sample_now] = (uint8_t)(ang / 360.0 * 250.0);
 			} else {
+				if (is_second_motor) {
+					voltage_sample[0] = ADC_V_L4;
+					voltage_sample[1] = ADC_V_L5;
+					voltage_sample[2] = ADC_V_L6;
+				} else {
+					voltage_sample[0] = ADC_V_L1;
+					voltage_sample[1] = ADC_V_L2;
+					voltage_sample[2] = ADC_V_L3;
+				}
 				zero = mcpwm_vzero;
 				m_phase_samples[m_sample_now] = 0;
 			}
@@ -2170,9 +2203,9 @@ void mc_interface_mc_timer_isr(bool is_second_motor, float dt) {
 						m_curr2_samples[m_sample_now] = ADC_curr_norm_value[5] * (8.0 / FAC_CURRENT);	
 					}
 
-					m_ph1_samples[m_sample_now] = ADC_V_L4 - zero;
-					m_ph2_samples[m_sample_now] = ADC_V_L5 - zero;
-					m_ph3_samples[m_sample_now] = ADC_V_L6 - zero;
+					m_ph1_samples[m_sample_now] = voltage_sample[0] - zero;
+					m_ph2_samples[m_sample_now] = voltage_sample[1] - zero;
+					m_ph3_samples[m_sample_now] = voltage_sample[2] - zero;
 				} else {
 					if (m_sample_raw) {
 						m_curr0_samples[m_sample_now] = ADC_curr_raw[0];
@@ -2184,9 +2217,9 @@ void mc_interface_mc_timer_isr(bool is_second_motor, float dt) {
 						m_curr2_samples[m_sample_now] = ADC_curr_norm_value[2] * (8.0 / FAC_CURRENT);
 					}					
 
-					m_ph1_samples[m_sample_now] = ADC_V_L1 - zero;
-					m_ph2_samples[m_sample_now] = ADC_V_L2 - zero;
-					m_ph3_samples[m_sample_now] = ADC_V_L3 - zero;
+					m_ph1_samples[m_sample_now] = voltage_sample[0] - zero;
+					m_ph2_samples[m_sample_now] = voltage_sample[1] - zero;
+					m_ph3_samples[m_sample_now] = voltage_sample[2] - zero;
 				}
 			}
 
@@ -2902,7 +2935,11 @@ static THD_FUNCTION(sample_send_thread, arg) {
 	sample_send_tp = chThdGetSelfX();
 
 	for(;;) {
-		chEvtWaitAny((eventmask_t) 1);
+		eventmask_t events = chEvtWaitAny((eventmask_t) 3);
+		if (events & (eventmask_t) 2) {
+			commands_printf("Error: FOC sample capture aborted because the voltage sample was not coherent.");
+		}
+		if (!(events & (eventmask_t) 1) || m_sample_capture_failed) continue;
 
 		int len = 0;
 		int offset = 0;

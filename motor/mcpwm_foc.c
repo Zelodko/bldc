@@ -42,6 +42,7 @@
 #include <stdio.h>
 #include "virtual_motor.h"
 #include "foc_math.h"
+#include "foc_sample.h"
 
 // Private variables
 static volatile bool m_dccal_done = false;
@@ -523,6 +524,7 @@ void mcpwm_foc_init(mc_configuration *conf_m1, mc_configuration *conf_m2) {
 
 
 	hw_setup_adc_channels();
+	foc_sample_init();
 
 	// Enable and start
     ADC1->CR |= ADC_CR_ADEN;
@@ -2939,6 +2941,7 @@ void mcpwm_foc_adc_int_handler(void *p, uint32_t flags) {
 
 
 	bool is_v7 = !(TIM1->CR1 & TIM_CR1_DIR);
+	foc_sample_capture(flags);
 
 	FOC_PROFILE_BEGIN();
 

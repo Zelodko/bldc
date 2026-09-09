@@ -266,7 +266,7 @@
 // Default setting overrides
 #define MCCONF_L_MIN_VOLTAGE			    60.0		// Minimum input voltage
 
-#define MCCONF_L_MAX_VOLTAGE			    100.0	// Maximum input voltage
+#define MCCONF_L_MAX_VOLTAGE			    170.0	// Maximum input voltage
 
 #define MCCONF_L_BATTERY_CUT_START		    65.0	// Start limiting the positive current at this voltage
 
