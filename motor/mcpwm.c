@@ -26,6 +26,7 @@
 #include <string.h>
 #include "mcpwm.h"
 #include "mcpwm_common.h"
+#include "mcpwm_adc.h"
 #include "mc_interface.h"
 #include "digital_filter.h"
 #include "utils_math.h"
@@ -128,6 +129,10 @@ static volatile int current_fir_index = 0;
 
 static volatile float last_adc_isr_duration;
 static volatile float last_inj_adc_isr_duration;
+static volatile bool regular_conversion_seen;
+static volatile bool injected_conversion_seen;
+static volatile uint32_t adc_error_flags;
+static volatile bool injected_frame_incomplete;
 
 // Global variables
 volatile float mcpwm_detect_currents[6];
@@ -152,14 +157,25 @@ static int read_hall(void);
 static void update_adc_sample_pos(mc_timer_struct *timer_tmp);
 static void commutate(int steps);
 static void set_next_timer_settings(mc_timer_struct *settings);
+static void apply_timer_settings(const volatile mc_timer_struct *settings);
 static void update_timer_attempt(void);
 static void set_switching_frequency(float frequency);
-static void do_dc_cal(void);
+static bool do_dc_cal(void);
+static bool timer_output_configuration_valid(bool require_all_off);
+static bool output_pattern_valid(void);
+static bool adc_status_valid(const mcpwm_adc_status_t *status);
 static void pll_run(float phase, float dt, volatile float *phase_var,
 		volatile float *speed_var);
 
 // Defines
 #define IS_DETECTING()			(state == MC_STATE_DETECTING)
+// Convert timing constants expressed as ticks on upstream's 168 MHz timer.
+#define BLDC_TIM_TICKS(n)		((uint32_t)((((uint64_t)(n) * SYSTEM_TIMER_CLOCK) + 168000000U - 1U) / 168000000U))
+#define BLDC_OC_FORCED_INACTIVE	4U
+#define BLDC_OC_PWM1			6U
+#define BLDC_OC_PWM2			7U
+#define MCPWM_FAST			__attribute__((section(".itcm_text")))
+#define ADC_SYNC_WAIT_CYCLES	((STM32_SYS_CK + 1999999U) / 2000000U)
 
 // Threads
 static THD_WORKING_AREA(timer_thread_wa, 512);
@@ -169,13 +185,41 @@ static THD_FUNCTION(rpm_thread, arg);
 static volatile bool timer_thd_stop;
 static volatile bool rpm_thd_stop;
 
+static void apply_switching_frequency_limits(volatile mc_configuration *configuration) {
+#ifdef HW_LIM_BLDC_F_SW
+	utils_truncate_number((float *)&configuration->m_bldc_f_sw_min, HW_LIM_BLDC_F_SW);
+	utils_truncate_number((float *)&configuration->m_bldc_f_sw_max, HW_LIM_BLDC_F_SW);
+	if (configuration->m_bldc_f_sw_min > configuration->m_bldc_f_sw_max) {
+		configuration->m_bldc_f_sw_min = configuration->m_bldc_f_sw_max;
+	}
+#else
+	(void)configuration;
+#endif
+#ifdef HW_LIM_DC_F_SW
+	utils_truncate_number((float *)&configuration->m_dc_f_sw, HW_LIM_DC_F_SW);
+#endif
+#ifdef HW_BLDC_FORCE_PWM_MODE
+	if (configuration->motor_type == MOTOR_TYPE_BLDC) {
+		configuration->pwm_mode = HW_BLDC_FORCE_PWM_MODE;
+	}
+#endif
+}
+
 void mcpwm_init(volatile mc_configuration *configuration) {
 	utils_sys_lock_cnt();
 
 	init_done= false;
 
+#ifdef HW_DISABLE_DC_MOTOR_MODE
+	if (configuration->motor_type == MOTOR_TYPE_DC) {
+		utils_sys_unlock_cnt();
+		return;
+	}
+#endif
+
 
 	conf = configuration;
+	apply_switching_frequency_limits(conf);
 
 	comm_step = 1;
 	detect_step = 0;
@@ -212,6 +256,10 @@ void mcpwm_init(volatile mc_configuration *configuration) {
 	m_pll_phase = 0.0;
 	m_pll_speed = 0.0;
 	rpm_timer_start = 0;
+	regular_conversion_seen = false;
+	injected_conversion_seen = false;
+	adc_error_flags = 0;
+	injected_frame_incomplete = false;
 
 	mcpwm_init_hall_table((int8_t*)conf->hall_table);
 
@@ -226,12 +274,11 @@ void mcpwm_init(volatile mc_configuration *configuration) {
 
 	rccResetTIM1();
 	rccResetTIM8();
-	rccResetADC12();
-	rccResetADC3();
-	rccResetDMA1();
+	rccResetTIM2();
 
 	TIM1->CNT = 0;
 	TIM8->CNT = 0;
+	TIM2->CNT = 0;
 
 	rccEnableTIM1(TRUE);
 
@@ -248,10 +295,11 @@ void mcpwm_init(volatile mc_configuration *configuration) {
 	TIM1->CCMR2 = TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC4M_2 | TIM_CCMR2_OC4M_1;
 
 	// output enable
-	TIM1->CCER = TIM_CCER_CC1E | TIM_CCER_CC1NE | TIM_CCER_CC2E | TIM_CCER_CC2NE | TIM_CCER_CC3E | TIM_CCER_CC3NE | TIM_CCER_CC4E;
+	TIM1->CCER = TIM_CCER_CC1E | TIM_CCER_CC1NE | TIM_CCER_CC2E | TIM_CCER_CC2NE |
+			TIM_CCER_CC3E | TIM_CCER_CC3NE | TIM_CCER_CC4E | TIMER_OUTPUT_POLARITY;
 
-	// Idle state high
-	TIM1->CR2 = TIM_CR2_OIS1 | TIM_CR2_OIS1N | TIM_CR2_OIS2 | TIM_CR2_OIS2N | TIM_CR2_OIS3 | TIM_CR2_OIS3N | TIM_CR2_OIS4;
+	// Keep every external gate input at its inactive level while MOE is clear.
+	TIM1->CR2 = TIMER_OUTPUT_IDLE_STATE;
 
 	// Capture compare value
 	TIM1->CCR1 = TIM1->ARR / 2;
@@ -264,7 +312,7 @@ void mcpwm_init(volatile mc_configuration *configuration) {
 	TIM1->CCMR2 |= TIM_CCMR2_OC3PE | TIM_CCMR2_OC4PE;
 
 	// Dead-time and off state
-	uint8_t deadtime = conf_general_calculate_deadtime(HW_DEAD_TIME_NSEC, SYSTEM_TIMER_CLOCK);
+	uint8_t deadtime = timer_deadtime_from_ns(HW_DEAD_TIME_NSEC, SYSTEM_TIMER_CLOCK);
 	TIM1->BDTR =  deadtime | TIM_BDTR_OSSI | TIM_BDTR_OSSR;
 
 #ifdef HW_USE_BRK
@@ -272,6 +320,9 @@ void mcpwm_init(volatile mc_configuration *configuration) {
 	// external fault signal. PWM outputs remain disabled until MCU is reset.
 	// software will catch the BRK flag to report the fault code
 	TIM1->BDTR |= TIM_BDTR_BKE;
+#ifdef BRK_HIGH
+	TIM1->BDTR |= TIM_BDTR_BKP;
+#endif
 #endif
 
 	// Enable Capture/Compare Preload
@@ -279,96 +330,6 @@ void mcpwm_init(volatile mc_configuration *configuration) {
 
 	// Enable auto-reload preload
 	TIM1->CR1 |= TIM_CR1_ARPE;
-
-
-	rccEnableDMA1(TRUE);
-	rccEnableADC12(TRUE);
-	rccEnableADC3(TRUE);
-
-	dmaStreamAlloc(STM32_DMA_STREAM_ID(1, 1),
-			5,
-			(stm32_dmaisr_t)mcpwm_adc_int_handler,
-			(void *)0);
-
-//	// DMA Channel 0 (default)
-//	// Direction - peripheral to memory (default)
-//	// Peripheral Increment (default)
-//	// Memory Increment
-//	DMA2_Stream4->CR |= DMA_SxCR_MINC;
-//	// Peripheral Data size - half word
-//	DMA2_Stream4->CR |= DMA_SxCR_PSIZE_0;
-//	// Memory data size - half word
-//	DMA2_Stream4->CR |= DMA_SxCR_MSIZE_0;
-//	// Mode - circular
-//	DMA2_Stream4->CR |= DMA_SxCR_CIRC;
-//	// Priority - high
-//	DMA2_Stream4->CR |= DMA_SxCR_PL_1;
-//	// Memory Burst - single (default)
-//	// Peripheral Burst - single (default)
-//	// Memory base address
-//	DMA2_Stream4->M0AR = (uint32_t)&ADC_Value;
-//	// Peripheral base address
-//	DMA2_Stream4->PAR = (uint32_t)&ADC->CDR;
-//	// Buffer Size
-//	DMA2_Stream4->NDTR = HW_ADC_CHANNELS;
-//	// Enable transfer complete interrupt
-//	DMA2_Stream4->CR |= DMA_SxCR_TCIE;
-//	// Enable stream
-//	DMA2_Stream4->CR |= DMA_SxCR_EN;
-//
-//	// ADC Common Init
-//	// Note that the ADC is running at 42MHz, which is higher than the
-//	// specified 36MHz in the data sheet, but it works.
-//	// Multi ADC mode selection - Triple Regular simultaneous mode 10110
-//	// Prescaler divide by 2 (default)
-//	// DMA mode 1 enabled, 3 (1 per ADC) half-words one by one - 1 then 2 then 3
-//	ADC->CCR = ADC_CCR_MULTI_4 | ADC_CCR_MULTI_2 | ADC_CCR_MULTI_1 | ADC_CCR_DMA_0;
-//	// ADC 1, 2, 3 config
-//	// Scan Conversion Mode - Enable
-//	ADC1->CR1 = ADC_CR1_SCAN;
-//	ADC2->CR1 = ADC_CR1_SCAN;
-//	ADC3->CR1 = ADC_CR1_SCAN;
-//	// External trigger - T8 CC1 (1101)
-//	// External trigger Edge - Falling	(10)
-//	ADC1->CR2 = ADC_CR2_EXTSEL_3 | ADC_CR2_EXTSEL_2 | ADC_CR2_EXTSEL_0 | ADC_CR2_EXTEN_1;
-//	// Number of conversions (0 = 1 conversion)
-//	ADC1->SQR1 = (HW_ADC_NBR_CONV - 1) << ADC_SQR1_L_Pos;
-//	ADC2->SQR1 = (HW_ADC_NBR_CONV - 1) << ADC_SQR1_L_Pos;
-//	ADC3->SQR1 = (HW_ADC_NBR_CONV - 1) << ADC_SQR1_L_Pos;
-//	// Temperature Sensor and VREFINT Enable
-//	ADC->CCR |= ADC_CCR_TSVREFE;
-//	// Multi Mode DMA Request After Last Transfer Cmd
-//	// DMA requests are issued as long as data are converted and DMA = 01, 10 or 11
-//	ADC->CCR |= ADC_CCR_DDS;
-//
-//	// Injected channels for current measurement at end of cycle
-//	// ADC1 Injected channel trigger T1 CC4 - 0 (default), falling edge
-//	ADC1->CR2 |= ADC_CR2_JEXTEN_1;
-//	// ADC2 Injected channel trigger T8 CC2 - 1100, falling edge
-//	ADC2->CR2 |= ADC_CR2_JEXTSEL_3 | ADC_CR2_JEXTSEL_2 | ADC_CR2_JEXTEN_1;
-//#ifdef HW_HAS_3_SHUNTS
-//	// ADC3 Injected channel trigger T8 CC3 - 1101, falling edge
-//	ADC3->CR2 |= ADC_CR2_JEXTSEL_3 | ADC_CR2_JEXTSEL_2 | ADC_CR2_JEXTSEL_0 | ADC_CR2_JEXTEN_1;
-//#endif
-//
-//	// Number of injected channels
-//	ADC1->JSQR = (HW_ADC_INJ_CHANNELS - 1) << ADC_SQR1_L_Pos;
-//	ADC2->JSQR = (HW_ADC_INJ_CHANNELS - 1) << ADC_SQR1_L_Pos;
-//#ifdef HW_HAS_3_SHUNTS
-//	ADC3->JSQR |= (HW_ADC_INJ_CHANNELS - 1) << ADC_SQR1_L_Pos;
-//#endif
-//
-//	hw_setup_adc_channels();
-//
-//	// Enable injected channels interrupt
-//	ADC1->CR1 |= ADC_CR1_JEOCIE;
-//	nvicEnableVector(ADC_IRQn, 6);
-//
-//	// Enable ADCs
-//	ADC1->CR2 |= ADC_CR2_ADON;
-//	ADC2->CR2 |= ADC_CR2_ADON;
-//	ADC3->CR2 |= ADC_CR2_ADON;
-
 	// Timer8 for ADC sampling
 	rccEnableTIM8(TRUE);
 
@@ -386,8 +347,7 @@ void mcpwm_init(volatile mc_configuration *configuration) {
 	// output enable
 	TIM8->CCER = TIM_CCER_CC1E | TIM_CCER_CC1NE | TIM_CCER_CC2E | TIM_CCER_CC2NE | TIM_CCER_CC3E | TIM_CCER_CC3NE;
 
-	// Idle state high
-	TIM8->CR2 = TIM_CR2_OIS1 | TIM_CR2_OIS1N | TIM_CR2_OIS2 | TIM_CR2_OIS2N | TIM_CR2_OIS3 | TIM_CR2_OIS3N;
+	TIM8->CR2 = TIMER_OUTPUT_IDLE_STATE;
 
 	// Capture compare value
 	TIM8->CCR1 = 500;
@@ -407,6 +367,19 @@ void mcpwm_init(volatile mc_configuration *configuration) {
 	// PWM outputs have to be enabled in order to trigger ADC on CCx
 	TIM8->BDTR |= TIM_BDTR_MOE;
 
+	// Route the three H7 ADC trigger sources. TIM8 TRGO starts the regular
+	// scan, while TIM8 TRGO2 and TIM2 OC1 provide the second and third
+	// independently positioned injected-current triggers.
+	TIM8->CR2 |= TIM_CR2_MMS_2;
+	TIM8->CR2 |= TIM_CR2_MMS2_2 | TIM_CR2_MMS2_0;
+	rccEnableTIM2(TRUE);
+	TIM2->ARR = 0xFFFF;
+	TIM2->CCR1 = 500;
+	TIM2->CCMR1 = TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1PE;
+	TIM2->CCER = TIM_CCER_CC1E;
+	TIM2->CR1 = TIM_CR1_ARPE;
+	TIM2->EGR = TIM_EGR_UG;
+
 	// Master mode - Update
 	TIM1->CR2 |= TIM_CR2_MMS_1;
 	// Select master slave mode to allow synchronisation with TIM8
@@ -416,22 +389,41 @@ void mcpwm_init(volatile mc_configuration *configuration) {
 	// Slave mode - Reset - Rising edge of the selected trigger input (TRGI) reinitializes the counter
 	// and generates an update of the registers.
 	TIM8->SMCR |= TIM_SMCR_SMS_2;
+	// TIM2 ITR0 is TIM1 TRGO on STM32H743.
+	TIM2->SMCR &= ~TIM_SMCR_TS;
+	TIM2->SMCR |= TIM_SMCR_SMS_2;
 
-	// Enable timer
-	TIM1->CR1 |= TIM_CR1_CEN;
-	TIM8->CR1 |= TIM_CR1_CEN;
-
-	// Main Output Enable
-	TIM1->BDTR |= TIM_BDTR_MOE;
-
-
-	// ADC sampling locations
-	stop_pwm_hw();
-	mc_timer_struct timer_tmp;
+	if (!mcpwm_adc_init(MCPWM_ADC_MODE_BLDC, mcpwm_adc_int_handler)) {
+		utils_sys_unlock_cnt();
+		return;
+	}
+	mc_timer_struct timer_tmp = {0};
 	timer_tmp.top = TIM1->ARR;
 	timer_tmp.duty = TIM1->ARR / 2;
 	update_adc_sample_pos(&timer_tmp);
-	set_next_timer_settings(&timer_tmp);
+	timer_struct = timer_tmp;
+	timer_struct.updated = true;
+	apply_timer_settings(&timer_tmp);
+	stop_pwm_hw();
+	if (!timer_output_configuration_valid(true)) {
+		rccResetTIM1();
+		rccResetTIM8();
+		rccResetTIM2();
+		utils_sys_unlock_cnt();
+		mcpwm_adc_deinit();
+		return;
+	}
+	TIM1->EGR = TIM_EGR_UG;
+	TIM8->EGR = TIM_EGR_UG;
+	TIM2->EGR = TIM_EGR_UG;
+
+	// Enable timer
+	TIM8->CR1 |= TIM_CR1_CEN;
+	TIM2->CR1 |= TIM_CR1_CEN;
+	TIM1->CR1 |= TIM_CR1_CEN;
+
+	// The forced-inactive channel configuration was committed and checked above.
+	TIM1->BDTR |= TIM_BDTR_MOE;
 
 	utils_sys_unlock_cnt();
 
@@ -441,7 +433,23 @@ void mcpwm_init(volatile mc_configuration *configuration) {
 	// Calibrate current offset
 	ENABLE_GATE();
 	DCCAL_OFF();
-	do_dc_cal();
+	if (!do_dc_cal()) {
+		stop_pwm_hw();
+		mcpwm_adc_deinit();
+		return;
+	}
+	mcpwm_adc_status_t adc_status;
+	mcpwm_adc_get_status(&adc_status);
+	// Do not expose the permanently enabled gate driver unless conversion,
+	// trigger, DMA and stopped-output initialization completed coherently.
+	if (!regular_conversion_seen || !injected_conversion_seen ||
+			injected_frame_incomplete ||
+			adc_error_flags != 0U || !adc_status_valid(&adc_status) ||
+			!timer_output_configuration_valid(false) || !output_pattern_valid()) {
+		stop_pwm_hw();
+		mcpwm_adc_deinit();
+		return;
+	}
 
 	// Start threads
 	timer_thd_stop = false;
@@ -476,10 +484,8 @@ void mcpwm_deinit(void) {
 
 	rccResetTIM1();
 	rccResetTIM8();
-	rccResetADC12();
-	rccResetADC3();
-	dmaStreamFree(STM32_DMA1_STREAM1);
-	nvicDisableVector(ADC_IRQn);
+	rccResetTIM2();
+	mcpwm_adc_deinit();
 
 }
 
@@ -492,8 +498,15 @@ void mcpwm_set_configuration(volatile mc_configuration *configuration) {
 	control_mode = CONTROL_MODE_NONE;
 	stop_pwm_ll();
 
+#ifdef HW_DISABLE_DC_MOTOR_MODE
+	if (configuration->motor_type == MOTOR_TYPE_DC) {
+		return;
+	}
+#endif
+
 	utils_sys_lock_cnt();
 	conf = configuration;
+	apply_switching_frequency_limits(conf);
 	comm_mode_next = conf->comm_mode;
 	mcpwm_init_hall_table((int8_t*)conf->hall_table);
 	update_sensor_mode();
@@ -522,7 +535,7 @@ void mcpwm_init_hall_table(int8_t *table) {
 	}
 }
 
-static void do_dc_cal(void) {
+static bool do_dc_cal(void) {
 	DCCAL_ON();
 
 	// Wait max 5 seconds
@@ -544,7 +557,14 @@ static void do_dc_cal(void) {
 #endif
 
 	curr_start_samples = 0;
-	while(curr_start_samples < 4000) {};
+	uint32_t sample_start = timer_time_now();
+	while (curr_start_samples < 4000) {
+		if (timer_seconds_elapsed_since(sample_start) >= 1.0) {
+			DCCAL_OFF();
+			return false;
+		}
+		chThdSleepMilliseconds(1);
+	}
 	curr0_offset = curr0_sum / curr_start_samples;
 	curr1_offset = curr1_sum / curr_start_samples;
 
@@ -554,6 +574,7 @@ static void do_dc_cal(void) {
 
 	DCCAL_OFF();
 	dccal_done = true;
+	return true;
 }
 
 static void pll_run(float phase, float dt, volatile float *phase_var,
@@ -1446,14 +1467,48 @@ static THD_FUNCTION(timer_thread, arg) {
 	}
 }
 
-void mcpwm_adc_inj_int_handler(void) {
+static inline __attribute__((always_inline)) uint32_t injected_adc_ready_mask(void) {
+	return ((ADC1->ISR & ADC_ISR_JEOS) ? 1U : 0U) |
+			((ADC2->ISR & ADC_ISR_JEOS) ? 2U : 0U) |
+			((ADC3->ISR & ADC_ISR_JEOS) ? 4U : 0U);
+}
+
+MCPWM_FAST void mcpwm_adc_inj_int_handler(void) {
 	uint32_t t_start = timer_time_now();
+	if (!init_done) {
+		injected_conversion_seen = true;
+	}
+	uint32_t ready_mask = injected_adc_ready_mask();
+#ifdef HW_BLDC_FORCE_PWM_MODE
+	// ADC1 owns the interrupt. Allow a bounded completion skew before reading
+	// the ADC2/3 JDRs that belong to the same synchronous sampling instant.
+	if (ready_mask != 7U) {
+		uint32_t wait_start = DWT->CYCCNT;
+		do {
+			ready_mask = injected_adc_ready_mask();
+		} while (ready_mask != 7U && (DWT->CYCCNT - wait_start) < ADC_SYNC_WAIT_CYCLES);
+	}
+#endif
+	if (ready_mask != 7U) {
+		injected_frame_incomplete = true;
+	}
+	if (!init_done) {
+		adc_error_flags |= (ADC1->ISR | ADC2->ISR | ADC3->ISR) &
+				(ADC_ISR_OVR | ADC_ISR_JQOVF);
+	}
+	if (ready_mask != 7U) {
+		if (state == MC_STATE_RUNNING || state == MC_STATE_DETECTING) {
+			mc_interface_fault_stop(FAULT_CODE_UNBALANCED_CURRENTS, false, true);
+		}
+		last_inj_adc_isr_duration = timer_seconds_elapsed_since(t_start);
+		return;
+	}
 
 	float curr0 = HW_GET_INJ_CURR1();
 	float curr1 = HW_GET_INJ_CURR2();
 
 	float curr0_2 = HW_GET_INJ_CURR1_S2();
-	float curr1_2 = HW_GET_INJ_CURR1_S2();
+	float curr1_2 = HW_GET_INJ_CURR2_S2();
 
 #ifdef HW_HAS_3_SHUNTS
 	float curr2 = HW_GET_INJ_CURR3();
@@ -1503,13 +1558,18 @@ void mcpwm_adc_inj_int_handler(void) {
 	//		DCCAL_ON();
 	//	}
 
-	curr0_sum += curr0;
-	curr1_sum += curr1;
+	if (!dccal_done) {
+		curr0_sum += curr0;
+		curr1_sum += curr1;
 #ifdef HW_HAS_3_SHUNTS
-	curr2_sum += curr2;
+		curr2_sum += curr2;
 #endif
-
-	curr_start_samples++;
+		curr_start_samples++;
+		last_current_sample = 0.0;
+		last_current_sample_filtered = 0.0;
+		last_inj_adc_isr_duration = timer_seconds_elapsed_since(t_start);
+		return;
+	}
 
 	curr0_currsamp -= curr0_offset;
 	curr1_currsamp -= curr1_offset;
@@ -1746,11 +1806,16 @@ void mcpwm_adc_inj_int_handler(void) {
 /*
  * New ADC samples ready. Do commutation!
  */
-void mcpwm_adc_int_handler(void *p, uint32_t flags) {
+MCPWM_FAST void mcpwm_adc_int_handler(void *p, uint32_t flags) {
 	(void)p;
 	(void)flags;
 
 	uint32_t t_start = timer_time_now();
+	if (!init_done) {
+		regular_conversion_seen = true;
+		adc_error_flags |= (ADC1->ISR | ADC2->ISR | ADC3->ISR) &
+				(ADC_ISR_OVR | ADC_ISR_JQOVF);
+	}
 
 	// Set the next timer settings if an update is far enough away
 	update_timer_attempt();
@@ -2215,6 +2280,68 @@ float mcpwm_get_last_inj_adc_isr_duration(void) {
 	return last_inj_adc_isr_duration;
 }
 
+static unsigned adc_regular_channel_from_status(uint32_t sqr1, unsigned rank) {
+	return (sqr1 >> (rank * 6U)) & 31U;
+}
+
+static bool adc_status_valid(const mcpwm_adc_status_t *status) {
+	const uint32_t cfgr_mask = ADC_CFGR_DMNGT_Msk | ADC_CFGR_RES_Msk |
+			ADC_CFGR_EXTSEL_Msk | ADC_CFGR_EXTEN_Msk | ADC_CFGR_JQDIS;
+	const uint32_t cfgr_expected = ADC_CFGR_DMNGT_0 | ADC_CFGR_DMNGT_1 |
+			ADC_CFGR_RES_1 | ADC_CFGR_RES_2 |
+			(7U << ADC_CFGR_EXTSEL_Pos) | ADC_CFGR_EXTEN_1 | ADC_CFGR_JQDIS;
+	const uint32_t adc_cr_required = ADC_CR_ADVREGEN | ADC_CR_BOOST |
+			ADC_CR_ADEN | ADC_CR_ADSTART | ADC_CR_JADSTART;
+	const uint32_t dma_mode_mask = STM32_DMA_CR_EN | STM32_DMA_CR_MINC |
+			STM32_DMA_CR_CIRC | STM32_DMA_CR_PSIZE_MASK |
+			STM32_DMA_CR_MSIZE_MASK | STM32_DMA_CR_PL_MASK | STM32_DMA_CR_TCIE;
+	const uint32_t dma_mode_base = STM32_DMA_CR_EN | STM32_DMA_CR_MINC |
+			STM32_DMA_CR_CIRC | STM32_DMA_CR_PSIZE_HWORD |
+			STM32_DMA_CR_MSIZE_HWORD | STM32_DMA_CR_PL(3);
+	const uint32_t requests[] = {
+		STM32_DMAMUX1_ADC1, STM32_DMAMUX1_ADC2, STM32_DMAMUX1_ADC3
+	};
+	const uint32_t triggers[] = {1U, 10U, 3U};
+	const unsigned ranks[] = {
+		ADC_IND_CURR1 - HW_ADC_IND_DMA_1 + 1U,
+		ADC_IND_CURR2 - HW_ADC_IND_DMA_2 + 1U,
+		ADC_IND_CURR3 - HW_ADC_IND_DMA_3 + 1U
+	};
+	ADC_TypeDef *adcs[] = {ADC1, ADC2, ADC3};
+	volatile uint16_t *buffers[] = {
+		&ADC_Value[HW_ADC_IND_DMA_1],
+		&ADC_Value[HW_ADC_IND_DMA_2],
+		&ADC_Value[HW_ADC_IND_DMA_3]
+	};
+
+	if (!status->initialized || status->mode != MCPWM_ADC_MODE_BLDC) {
+		return false;
+	}
+
+	for (unsigned i = 0; i < 3; i++) {
+		unsigned channel = adc_regular_channel_from_status(status->adc_sqr1[i], ranks[i]);
+		uint32_t jsqr_expected = (triggers[i] << ADC_JSQR_JEXTSEL_Pos) |
+				ADC_JSQR_JEXTEN_1 | (channel << ADC_JSQR_JSQ1_Pos);
+		uint32_t dma_expected = dma_mode_base | (i == 2U ? STM32_DMA_CR_TCIE : 0U);
+
+		if ((status->adc_cr[i] & adc_cr_required) != adc_cr_required ||
+				(status->adc_cfgr[i] & cfgr_mask) != cfgr_expected ||
+				(status->adc_sqr1[i] & ADC_SQR1_L_Msk) !=
+						((HW_ADC_NBR_CONV - 1U) << ADC_SQR1_L_Pos) ||
+				status->adc_jsqr[i] != jsqr_expected ||
+				(status->dma_cr[i] & dma_mode_mask) != dma_expected ||
+				status->dma_ndtr[i] > HW_ADC_NBR_CONV ||
+				status->dma_par[i] != (uint32_t)&adcs[i]->DR ||
+				status->dma_m0ar[i] != (uint32_t)buffers[i] ||
+				(status->dmamux_ccr[i] & DMAMUX_CxCR_DMAREQ_ID_Msk) != requests[i]) {
+			return false;
+		}
+	}
+
+	return status->adc_ier[0] == ADC_IER_JEOSIE &&
+			status->adc_ier[1] == 0U && status->adc_ier[2] == 0U;
+}
+
 mc_rpm_dep_struct mcpwm_get_rpm_dep(void) {
 	return rpm_dep;
 }
@@ -2336,16 +2463,16 @@ static void update_adc_sample_pos(mc_timer_struct *timer_tmp) {
 	curr_samp_volt = 0;
 
 	if (conf->motor_type == MOTOR_TYPE_DC) {
-		curr1_sample = top - 10; // Not used anyway
-		curr2_sample = top - 10;
+		curr1_sample = top - BLDC_TIM_TICKS(10); // Not used anyway
+		curr2_sample = top - BLDC_TIM_TICKS(10);
 #ifdef HW_HAS_3_SHUNTS
-		curr3_sample = top - 10;
+		curr3_sample = top - BLDC_TIM_TICKS(10);
 #endif
 
-		if (duty > 1000) {
+		if (duty > BLDC_TIM_TICKS(1000)) {
 			val_sample = duty / 2;
 		} else {
-			val_sample = duty + 800;
+			val_sample = duty + BLDC_TIM_TICKS(800);
 			curr_samp_volt = (1 << 0) | (1 << 1) | (1 << 2);
 		}
 
@@ -2368,9 +2495,9 @@ static void update_adc_sample_pos(mc_timer_struct *timer_tmp) {
 #endif
 		} else {
 			if (conf->pwm_mode == PWM_MODE_BIPOLAR) {
-				uint32_t samp_neg = top - 2;
+				uint32_t samp_neg = top - BLDC_TIM_TICKS(2);
 				uint32_t samp_pos = duty + (top - duty) / 2;
-				uint32_t samp_zero = top - 2;
+				uint32_t samp_zero = top - BLDC_TIM_TICKS(2);
 
 				// Voltage and other sampling
 				val_sample = top / 4;
@@ -2456,8 +2583,8 @@ static void update_adc_sample_pos(mc_timer_struct *timer_tmp) {
 
 				// Current samples
 				curr1_sample = duty + (top - duty) / 2;
-				if (curr1_sample > (top - 70)) {
-					curr1_sample = top - 70;
+				if (curr1_sample > (top - BLDC_TIM_TICKS(70))) {
+					curr1_sample = top - BLDC_TIM_TICKS(70);
 				}
 
 				curr2_sample = curr1_sample;
@@ -2470,21 +2597,21 @@ static void update_adc_sample_pos(mc_timer_struct *timer_tmp) {
 				if (duty > (top / 2)) {
 #if CURR1_DOUBLE_SAMPLE
 					if (comm_step == 2 || comm_step == 3) {
-						curr1_sample = duty + 90;
-						curr2_sample = top - 230;
+						curr1_sample = duty + BLDC_TIM_TICKS(90);
+						curr2_sample = top - BLDC_TIM_TICKS(230);
 					}
 #endif
 
 #if CURR2_DOUBLE_SAMPLE
 					if (direction) {
 						if (comm_step == 4 || comm_step == 5) {
-							curr1_sample = duty + 90;
-							curr2_sample = top - 230;
+							curr1_sample = duty + BLDC_TIM_TICKS(90);
+							curr2_sample = top - BLDC_TIM_TICKS(230);
 						}
 					} else {
 						if (comm_step == 1 || comm_step == 6) {
-							curr1_sample = duty + 90;
-							curr2_sample = top - 230;
+							curr1_sample = duty + BLDC_TIM_TICKS(90);
+							curr2_sample = top - BLDC_TIM_TICKS(230);
 						}
 					}
 #endif
@@ -2539,6 +2666,16 @@ static void update_adc_sample_pos(mc_timer_struct *timer_tmp) {
 		}
 	}
 
+#ifdef HW_BLDC_FORCE_PWM_MODE
+	if (conf->motor_type == MOTOR_TYPE_BLDC) {
+		// One trigger instant keeps all three injected currents in the same frame.
+		curr2_sample = curr1_sample;
+#ifdef HW_HAS_3_SHUNTS
+		curr3_sample = curr1_sample;
+#endif
+	}
+#endif
+
 	timer_tmp->val_sample = val_sample;
 	timer_tmp->curr1_sample = curr1_sample;
 	timer_tmp->curr2_sample = curr2_sample;
@@ -2586,7 +2723,7 @@ static void update_sensor_mode(void) {
 	}
 }
 
-static void commutate(int steps) {
+MCPWM_FAST static void commutate(int steps) {
 	last_pwm_cycles_sum = pwm_cycles_sum;
 	last_pwm_cycles_sums[comm_step - 1] = pwm_cycles_sum;
 	pwm_cycles_sum = 0;
@@ -2635,43 +2772,104 @@ static void set_next_timer_settings(mc_timer_struct *settings) {
 	update_timer_attempt();
 }
 
-/**
- * Try to apply the new timer settings. This is really not an elegant solution, but for now it is
- * the best I can come up with.
- */
-// Safety margin (in TIM1 ticks) from the counter wraparound point required before
-// applying new timer settings, expressed as a time constant rather than a fixed tick
-// count so it stays correct across different core/timer clock speeds. Matches
-// upstream's raw 10/500-tick margins at F4's 168MHz TIM1 clock; scaled here by this
-// board's actual SYSTEM_TIMER_CLOCK (used verbatim, this would be ~30% too tight on
-// this board's faster 240MHz TIM1 clock).
-#define UPDATE_MARGIN_MIN ((uint32_t)((10.0f / 168000000.0f) * SYSTEM_TIMER_CLOCK))
-#define UPDATE_MARGIN_MAX ((uint32_t)((500.0f / 168000000.0f) * SYSTEM_TIMER_CLOCK))
+MCPWM_FAST static void apply_timer_settings(const volatile mc_timer_struct *settings) {
+	// Stage all master/slave timer preloads without allowing a partial update.
+	TIM1->CR1 |= TIM_CR1_UDIS;
+	TIM8->CR1 |= TIM_CR1_UDIS;
+	TIM2->CR1 |= TIM_CR1_UDIS;
+	TIM1->ARR = settings->top;
+	TIM1->CCR1 = settings->duty;
+	TIM1->CCR2 = settings->duty;
+	TIM1->CCR3 = settings->duty;
+	TIM8->CCR1 = settings->val_sample;
+	TIM1->CCR4 = settings->curr1_sample;
+	TIM8->CCR2 = settings->curr2_sample;
+#ifdef HW_HAS_3_SHUNTS
+	TIM2->CCR1 = settings->curr3_sample;
+#endif
+	TIM1->CR1 &= ~TIM_CR1_UDIS;
+	TIM8->CR1 &= ~TIM_CR1_UDIS;
+	TIM2->CR1 &= ~TIM_CR1_UDIS;
+}
 
-static void update_timer_attempt(void) {
+static uint32_t timer_channel_mode(unsigned channel) {
+	if (channel == 1U) {
+		return (TIM1->CCMR1 & TIM_CCMR1_OC1M_Msk) >> TIM_CCMR1_OC1M_Pos;
+	} else if (channel == 2U) {
+		return (TIM1->CCMR1 & TIM_CCMR1_OC2M_Msk) >> TIM_CCMR1_OC2M_Pos;
+	}
+	return (TIM1->CCMR2 & TIM_CCMR2_OC3M_Msk) >> TIM_CCMR2_OC3M_Pos;
+}
+
+// Validate the timer topology before BLDC initialization is reported complete.
+static bool timer_output_configuration_valid(bool require_all_off) {
+	const uint32_t channel_enable = TIM_CCER_CC1E | TIM_CCER_CC2E | TIM_CCER_CC3E;
+	const uint32_t channel_enable_n = TIM_CCER_CC1NE | TIM_CCER_CC2NE | TIM_CCER_CC3NE;
+	const uint32_t polarity_mask = TIM_CCER_CC1P | TIM_CCER_CC1NP |
+			TIM_CCER_CC2P | TIM_CCER_CC2NP | TIM_CCER_CC3P | TIM_CCER_CC3NP;
+	const uint32_t idle_mask = TIM_CR2_OIS1 | TIM_CR2_OIS1N | TIM_CR2_OIS2 |
+			TIM_CR2_OIS2N | TIM_CR2_OIS3 | TIM_CR2_OIS3N;
+	const uint32_t expected_deadtime =
+			timer_deadtime_from_ns(HW_DEAD_TIME_NSEC, SYSTEM_TIMER_CLOCK);
+
+	bool valid = TIM1->PSC == 0U && TIM1->ARR > 0U &&
+			(TIM1->CR1 & (TIM_CR1_CMS | TIM_CR1_DIR)) == 0U &&
+			(TIM1->CR2 & TIM_CR2_CCPC) != 0U &&
+			(TIM1->CR2 & TIM_CR2_MMS_Msk) == TIM_CR2_MMS_1 &&
+			(TIM1->CR2 & idle_mask) == TIMER_OUTPUT_IDLE_STATE &&
+			(TIM1->CCER & channel_enable) == channel_enable &&
+			(TIM1->CCER & polarity_mask) == TIMER_OUTPUT_POLARITY &&
+			(TIM1->BDTR & TIM_BDTR_DTG_Msk) == expected_deadtime &&
+			(TIM1->BDTR & (TIM_BDTR_OSSI | TIM_BDTR_OSSR)) ==
+					(TIM_BDTR_OSSI | TIM_BDTR_OSSR) &&
+			(TIM1->BDTR & TIM_BDTR_AOE) == 0U &&
+			TIM1->CCR1 <= TIM1->ARR && TIM1->CCR2 <= TIM1->ARR &&
+			TIM1->CCR3 <= TIM1->ARR && TIM1->CCR4 <= TIM1->ARR &&
+			TIM8->PSC == 0U && TIM8->ARR == 0xFFFFU &&
+			(TIM8->CR2 & TIM_CR2_MMS_Msk) == TIM_CR2_MMS_2 &&
+			(TIM8->CR2 & TIM_CR2_MMS2_Msk) == (TIM_CR2_MMS2_2 | TIM_CR2_MMS2_0) &&
+			(TIM8->SMCR & TIM_SMCR_TS_Msk) == 0U &&
+			(TIM8->SMCR & TIM_SMCR_SMS_Msk) == TIM_SMCR_SMS_2 &&
+			TIM8->CCR1 <= TIM1->ARR && TIM8->CCR2 <= TIM1->ARR &&
+			TIM2->PSC == 0U && TIM2->ARR == 0xFFFFU &&
+			(TIM2->SMCR & TIM_SMCR_TS_Msk) == 0U &&
+			(TIM2->SMCR & TIM_SMCR_SMS_Msk) == TIM_SMCR_SMS_2 &&
+			TIM2->CCR1 <= TIM1->ARR;
+
+#ifdef HW_USE_BRK
+	valid = valid && (TIM1->BDTR & TIM_BDTR_BKE) != 0U;
+#else
+	valid = valid && (TIM1->BDTR & (TIM_BDTR_BKE | TIM_BDTR_BK2E)) == 0U;
+#endif
+
+#ifdef HW_BLDC_FORCE_PWM_MODE
+	valid = valid && conf && conf->motor_type == MOTOR_TYPE_BLDC &&
+			conf->pwm_mode == HW_BLDC_FORCE_PWM_MODE &&
+			TIM1->CCR4 == TIM8->CCR2 && TIM1->CCR4 == TIM2->CCR1;
+#endif
+
+	if (require_all_off) {
+		valid = valid && (TIM1->BDTR & TIM_BDTR_MOE) == 0U &&
+				(TIM1->CCER & channel_enable_n) == 0U &&
+				timer_channel_mode(1) == BLDC_OC_FORCED_INACTIVE &&
+				timer_channel_mode(2) == BLDC_OC_FORCED_INACTIVE &&
+				timer_channel_mode(3) == BLDC_OC_FORCED_INACTIVE;
+	}
+
+	return valid;
+}
+
+// Preserve the upstream F4 update window by scaling its timer-tick margins to
+// the actual motor-control timer clock.
+#define UPDATE_MARGIN_MIN BLDC_TIM_TICKS(10)
+#define UPDATE_MARGIN_MAX BLDC_TIM_TICKS(500)
+
+MCPWM_FAST static void update_timer_attempt(void) {
 	utils_sys_lock_cnt();
 
 	// Set the next timer settings if an update is far enough away
 	if (!timer_struct.updated && TIM1->CNT > UPDATE_MARGIN_MIN && TIM1->CNT < (TIM1->ARR - UPDATE_MARGIN_MAX)) {
-		// Disable preload register updates
-		TIM1->CR1 |= TIM_CR1_UDIS;
-		TIM8->CR1 |= TIM_CR1_UDIS;
-
-		// Set the new configuration
-		TIM1->ARR = timer_struct.top;
-		TIM1->CCR1 = timer_struct.duty;
-		TIM1->CCR2 = timer_struct.duty;
-		TIM1->CCR3 = timer_struct.duty;
-		TIM8->CCR1 = timer_struct.val_sample;
-		TIM1->CCR4 = timer_struct.curr1_sample;
-		TIM8->CCR2 = timer_struct.curr2_sample;
-#ifdef HW_HAS_3_SHUNTS
-		TIM8->CCR3 = timer_struct.curr3_sample;
-#endif
-
-		// Enables preload register updates
-		TIM1->CR1 &= ~TIM_CR1_UDIS;
-		TIM8->CR1 &= ~TIM_CR1_UDIS;
+		apply_timer_settings(&timer_struct);
 		timer_struct.updated = true;
 	}
 
@@ -2691,7 +2889,73 @@ static void set_switching_frequency(float frequency) {
 	set_next_timer_settings(&timer_tmp);
 }
 
-static void set_next_comm_step(int next_step) {
+MCPWM_FAST static void bldc_update_channel(unsigned channel, int state_now) {
+	volatile uint32_t *ccmr;
+	uint32_t mode_mask, mode_pos, enable, enable_n;
+	if (channel == 1U) {
+		ccmr = &TIM1->CCMR1;
+		mode_mask = TIM_CCMR1_OC1M_Msk;
+		mode_pos = TIM_CCMR1_OC1M_Pos;
+		enable = TIM_CCER_CC1E;
+		enable_n = TIM_CCER_CC1NE;
+	} else if (channel == 2U) {
+		ccmr = &TIM1->CCMR1;
+		mode_mask = TIM_CCMR1_OC2M_Msk;
+		mode_pos = TIM_CCMR1_OC2M_Pos;
+		enable = TIM_CCER_CC2E;
+		enable_n = TIM_CCER_CC2NE;
+	} else {
+		ccmr = &TIM1->CCMR2;
+		mode_mask = TIM_CCMR2_OC3M_Msk;
+		mode_pos = TIM_CCMR2_OC3M_Pos;
+		enable = TIM_CCER_CC3E;
+		enable_n = TIM_CCER_CC3NE;
+	}
+
+	uint32_t mode = BLDC_OC_FORCED_INACTIVE;
+	bool low_side = state_now != 0;
+	if (state_now > 0) {
+		mode = BLDC_OC_PWM1;
+		if (conf->motor_type == MOTOR_TYPE_BLDC && !IS_DETECTING() &&
+				conf->pwm_mode == PWM_MODE_NONSYNCHRONOUS_HISW) {
+			low_side = false;
+		}
+	} else if (state_now < 0 && conf->motor_type == MOTOR_TYPE_BLDC &&
+			!IS_DETECTING() && conf->pwm_mode == PWM_MODE_BIPOLAR) {
+		mode = BLDC_OC_PWM2;
+	}
+
+	// CCPC preloads the mode until TIMER_CONTROL_UPDATE commits the full sector.
+	TIM1->CCER &= ~enable;
+	*ccmr = (*ccmr & ~mode_mask) | (mode << mode_pos);
+	TIM1->CCER |= enable;
+	if (low_side) {
+		TIM1->CCER |= enable_n;
+	} else {
+		TIM1->CCER &= ~enable_n;
+	}
+}
+
+#undef TIMER_UPDATE_CH1_0
+#undef TIMER_UPDATE_CH1_POS
+#undef TIMER_UPDATE_CH1_NEG
+#undef TIMER_UPDATE_CH2_0
+#undef TIMER_UPDATE_CH2_POS
+#undef TIMER_UPDATE_CH2_NEG
+#undef TIMER_UPDATE_CH3_0
+#undef TIMER_UPDATE_CH3_POS
+#undef TIMER_UPDATE_CH3_NEG
+#define TIMER_UPDATE_CH1_0() bldc_update_channel(1, 0)
+#define TIMER_UPDATE_CH1_POS() bldc_update_channel(1, 1)
+#define TIMER_UPDATE_CH1_NEG() bldc_update_channel(1, -1)
+#define TIMER_UPDATE_CH2_0() bldc_update_channel(2, 0)
+#define TIMER_UPDATE_CH2_POS() bldc_update_channel(2, 1)
+#define TIMER_UPDATE_CH2_NEG() bldc_update_channel(2, -1)
+#define TIMER_UPDATE_CH3_0() bldc_update_channel(3, 0)
+#define TIMER_UPDATE_CH3_POS() bldc_update_channel(3, 1)
+#define TIMER_UPDATE_CH3_NEG() bldc_update_channel(3, -1)
+
+MCPWM_FAST static void set_next_comm_step(int next_step) {
 	if (conf->motor_type == MOTOR_TYPE_DC) {
 		TIMER_UPDATE_CH2_0();
 
@@ -2836,4 +3100,63 @@ static void set_next_comm_step(int next_step) {
 		TIMER_UPDATE_CH2_0();
 		TIMER_UPDATE_CH3_0();
 	}
+}
+
+// Confirm that the initialized output modes match the current six-step state.
+static bool output_pattern_valid(void) {
+	int phase_state[3] = {0, 0, 0};
+
+	if (state == MC_STATE_FULL_BRAKE) {
+		phase_state[0] = -1;
+		phase_state[1] = -1;
+		phase_state[2] = -1;
+	} else if (state == MC_STATE_RUNNING || state == MC_STATE_DETECTING) {
+		if (conf->motor_type == MOTOR_TYPE_DC) {
+			phase_state[0] = direction ? 1 : -1;
+			phase_state[1] = 0;
+			phase_state[2] = direction ? -1 : 1;
+		} else if (comm_step >= 1 && comm_step <= 6) {
+			static const int8_t forward[6][3] = {
+				{ 0,  1, -1}, { 1,  0, -1}, { 1, -1,  0},
+				{ 0, -1,  1}, {-1,  0,  1}, {-1,  1,  0}
+			};
+			static const int8_t reverse[6][3] = {
+				{ 0, -1,  1}, { 1, -1,  0}, { 1,  0, -1},
+				{ 0,  1, -1}, {-1,  1,  0}, {-1,  0,  1}
+			};
+			const int8_t *expected = direction ? forward[comm_step - 1] : reverse[comm_step - 1];
+			phase_state[0] = expected[0];
+			phase_state[1] = expected[1];
+			phase_state[2] = expected[2];
+		} else {
+			return false;
+		}
+	} else if (state != MC_STATE_OFF) {
+		return false;
+	}
+
+	const uint32_t main_enable[] = {TIM_CCER_CC1E, TIM_CCER_CC2E, TIM_CCER_CC3E};
+	const uint32_t comp_enable[] = {TIM_CCER_CC1NE, TIM_CCER_CC2NE, TIM_CCER_CC3NE};
+	for (unsigned i = 0; i < 3; i++) {
+		uint32_t expected_mode = BLDC_OC_FORCED_INACTIVE;
+		bool expected_comp = phase_state[i] != 0;
+		if (phase_state[i] > 0) {
+			expected_mode = BLDC_OC_PWM1;
+			if (state != MC_STATE_DETECTING && conf->motor_type == MOTOR_TYPE_BLDC &&
+					conf->pwm_mode == PWM_MODE_NONSYNCHRONOUS_HISW) {
+				expected_comp = false;
+			}
+		} else if (phase_state[i] < 0 && state != MC_STATE_DETECTING &&
+				conf->motor_type == MOTOR_TYPE_BLDC && conf->pwm_mode == PWM_MODE_BIPOLAR) {
+			expected_mode = BLDC_OC_PWM2;
+		}
+
+		if ((TIM1->CCER & main_enable[i]) == 0U ||
+				timer_channel_mode(i + 1U) != expected_mode ||
+				((TIM1->CCER & comp_enable[i]) != 0U) != expected_comp) {
+			return false;
+		}
+	}
+
+	return true;
 }

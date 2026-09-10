@@ -323,6 +323,12 @@ const volatile mc_configuration* mc_interface_get_configuration(void) {
 void mc_interface_set_configuration(mc_configuration *configuration) {
 	volatile motor_if_state_t *motor = motor_now();
 
+#ifdef HW_DISABLE_DC_MOTOR_MODE
+	if (configuration->motor_type == MOTOR_TYPE_DC) {
+		configuration->motor_type = MOTOR_TYPE_FOC;
+	}
+#endif
+
 #if defined HW_HAS_DUAL_PARALLEL
 	configuration->motor_type = MOTOR_TYPE_FOC;
 #else

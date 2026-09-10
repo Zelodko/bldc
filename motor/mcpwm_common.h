@@ -22,6 +22,47 @@
 
 // Common macros
 
+#ifdef INVERTED_TOP_DRIVER_INPUT
+#define TIMER_TOP_POLARITY (TIM_CCER_CC1P | TIM_CCER_CC2P | TIM_CCER_CC3P)
+#define TIMER_TOP_IDLE_STATE (TIM_CR2_OIS1 | TIM_CR2_OIS2 | TIM_CR2_OIS3)
+#else
+#define TIMER_TOP_POLARITY 0U
+#define TIMER_TOP_IDLE_STATE 0U
+#endif
+
+#ifdef INVERTED_BOTTOM_DRIVER_INPUT
+#define TIMER_BOTTOM_POLARITY (TIM_CCER_CC1NP | TIM_CCER_CC2NP | TIM_CCER_CC3NP)
+#define TIMER_BOTTOM_IDLE_STATE (TIM_CR2_OIS1N | TIM_CR2_OIS2N | TIM_CR2_OIS3N)
+#else
+#define TIMER_BOTTOM_POLARITY 0U
+#define TIMER_BOTTOM_IDLE_STATE 0U
+#endif
+
+#define TIMER_OUTPUT_POLARITY (TIMER_TOP_POLARITY | TIMER_BOTTOM_POLARITY)
+#define TIMER_OUTPUT_IDLE_STATE (TIMER_TOP_IDLE_STATE | TIMER_BOTTOM_IDLE_STATE)
+
+// Decode the nonlinear STM32 advanced-timer DTG field into timer-clock ticks.
+static inline uint32_t timer_deadtime_ticks(uint8_t dtg) {
+	if ((dtg & 0x80U) == 0U) {
+		return dtg;
+	} else if ((dtg & 0xC0U) == 0x80U) {
+		return (64U + (dtg & 0x3FU)) * 2U;
+	} else if ((dtg & 0xE0U) == 0xC0U) {
+		return (32U + (dtg & 0x1FU)) * 8U;
+	}
+	return (32U + (dtg & 0x1FU)) * 16U;
+}
+
+static inline uint8_t timer_deadtime_from_ns(float deadtime_ns, float timer_clock) {
+	uint8_t dtg = conf_general_calculate_deadtime(deadtime_ns, timer_clock);
+	float actual_ns = (float)timer_deadtime_ticks(dtg) * 1.0e9f / timer_clock;
+	// Round upward when the generic conversion selected the lower adjacent step.
+	if (actual_ns < deadtime_ns && dtg < 0xFFU) {
+		dtg++;
+	}
+	return dtg;
+}
+
 ////////////////////////////////////////////////////
 
 #define TIMER_UPDATE_CH1_0() \

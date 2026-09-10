@@ -29,9 +29,12 @@
 __attribute__((section(".itcm_text")))
 CH_IRQ_HANDLER(ADC1_2_3_IRQHandler) {
 	CH_IRQ_PROLOGUE();
-	// Clear the IT pending bit
-	ADC1->ISR = ~ADC_ISR_JEOC;
-	mc_interface_adc_inj_int_handler();
+	if ((ADC1->ISR & ADC_ISR_JEOS) && (ADC1->IER & ADC_IER_JEOSIE)) {
+		mc_interface_adc_inj_int_handler();
+		ADC1->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
+		ADC2->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
+		ADC3->ISR = ADC_ISR_JEOC | ADC_ISR_JEOS;
+	}
 	CH_IRQ_EPILOGUE();
 }
 

@@ -26,6 +26,8 @@
 #define HW_HAS_3_SHUNTS
 #define HW_HAS_PHASE_SHUNTS
 #define HW_HAS_PHASE_FILTERS
+// The gate driver is permanently enabled and has no fault or timer-break
+// signal routed to the MCU. Safe shutdown therefore relies on timer outputs.
 
 // Macros
 #define LED_GREEN_GPIO			GPIOE
@@ -336,6 +338,16 @@
 #define HW_LIM_DUTY_MIN			0.0, 0.1
 #define HW_LIM_DUTY_MAX			0.0, 0.95
 #define HW_LIM_TEMP_FET			-40.0, 90.0
+#define HW_LIM_FOC_CTRL_LOOP_FREQ	16000.0, 64000.0
+#define HW_LIM_FOC_F_ZV			16000.0, 64000.0
+#define HW_LIM_BLDC_F_SW		8000.0, 35000.0
+#define HW_LIM_DC_F_SW			8000.0, 35000.0
+// BLDC is operational with synchronous PWM, but hardware validation is still
+// limited. Keep the other BLDC PWM modes and DC motor mode disabled until they
+// are qualified separately on this power stage. The upstream BLDC parameter
+// detector uses a 50% spin-up target, so detection needs at least 0.5 max duty.
+#define HW_BLDC_FORCE_PWM_MODE	PWM_MODE_SYNCHRONOUS
+#define HW_DISABLE_DC_MOTOR_MODE
 
 //functions
 bool hw_sample_shutdown_button(void);

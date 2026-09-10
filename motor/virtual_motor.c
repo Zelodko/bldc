@@ -209,7 +209,8 @@ static void connect_virtual_motor(float ml , float J, float Vbus){
 		utils_fast_sincos_better(virtual_motor.phi, (float*)&virtual_motor.sin_phi,
 														(float*)&virtual_motor.cos_phi);
 
-		if(m_conf->foc_sensor_mode == FOC_SENSOR_MODE_ENCODER){
+		if (m_conf->foc_sensor_mode == FOC_SENSOR_MODE_ENCODER ||
+				m_conf->foc_sensor_mode == FOC_SENSOR_MODE_ENCODER_AB) {
 			encoder_deinit();
 		}
 	}
@@ -256,7 +257,8 @@ static void disconnect_virtual_motor( void ){
 		// External trigger Edge - Falling	(10)
 //		ADC1->CR2 |= ADC_CR2_EXTSEL_1 | ADC_CR2_EXTSEL_0 | ADC_CR2_EXTEN_1;
 
-		if (m_conf->foc_sensor_mode == FOC_SENSOR_MODE_ENCODER) {
+		if (m_conf->foc_sensor_mode == FOC_SENSOR_MODE_ENCODER ||
+				m_conf->foc_sensor_mode == FOC_SENSOR_MODE_ENCODER_AB) {
 			encoder_deinit();
 			encoder_init(m_conf);
 		}

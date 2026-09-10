@@ -361,8 +361,7 @@ void conf_general_read_app_configuration(app_configuration *conf) {
 #endif
 	if(conf->crc != app_calc_crc(conf)) {
 		is_ok = false;
-		mc_interface_fault_stop(FAULT_CODE_FLASH_CORRUPTION_APP_CFG, false, false);
-		fault_data f;
+		fault_data f = {0};
 		f.fault = FAULT_CODE_FLASH_CORRUPTION_APP_CFG;
 		terminal_add_fault_data(&f);
 	}
@@ -370,6 +369,8 @@ void conf_general_read_app_configuration(app_configuration *conf) {
 	// Set the default configuration
 	if (!is_ok) {
 		confgenerator_set_defaults_appconf(conf);
+		conf->can_baud_rate = g_backup.can_baud;
+		conf->controller_id = g_backup.can_id;
 	}
 }
 
@@ -394,6 +395,13 @@ bool conf_general_store_app_configuration(app_configuration *conf) {
 	uint8_t *conf_addr = (uint8_t*)conf;
 	uint16_t var;
 
+	// Force CAN communication in persistent storage on boards that have no
+	// other recovery interface, while retaining the requested runtime mode.
+#ifdef HW_BOOT_VESC_CAN
+	CAN_MODE can_mode_before = conf->can_mode;
+	conf->can_mode = CAN_MODE_VESC;
+#endif
+
 	conf->crc = app_calc_crc(conf);
 
 	HAL_FLASH_Unlock();
@@ -409,6 +417,10 @@ bool conf_general_store_app_configuration(app_configuration *conf) {
 		}
 	}
 	HAL_FLASH_Lock();
+
+#ifdef HW_BOOT_VESC_CAN
+	conf->can_mode = can_mode_before;
+#endif
 
 	timeout_configure_IWDT();
 	mc_interface_ignore_input_both(100);
@@ -451,8 +463,7 @@ void conf_general_read_mc_configuration(mc_configuration *conf, bool is_motor_2)
 #endif
 	if(conf->crc != mc_interface_calc_crc(conf, is_motor_2)) {
 		is_ok = false;
-		mc_interface_fault_stop(FAULT_CODE_FLASH_CORRUPTION_MC_CFG, is_motor_2, false);
-		fault_data f;
+		fault_data f = {0};
 		f.fault = FAULT_CODE_FLASH_CORRUPTION_MC_CFG;
 		terminal_add_fault_data(&f);
 	}
@@ -1961,9 +1972,11 @@ int conf_general_detect_apply_all_foc(float max_power_loss,
 	if (res && res_linkage_m2) {
 		mcconf_old->l_current_max = i_max;
 		mcconf_old->l_current_min = -i_max;
+#ifndef HW_NO_ABS_MAX_CALC
 		float abs_max = i_max * 1.5;
 		utils_truncate_number(&abs_max, HW_LIM_CURRENT_ABS);
-		mcconf_old->l_abs_current_max = abs_max;		
+		mcconf_old->l_abs_current_max = abs_max;
+#endif
 		mcconf_old->motor_type = MOTOR_TYPE_FOC;
 		mcconf_old->foc_motor_r = r;
 		mcconf_old->foc_motor_l = l;
@@ -1989,9 +2002,11 @@ int conf_general_detect_apply_all_foc(float max_power_loss,
 #ifdef HW_HAS_DUAL_MOTORS
 		mcconf_old_second->l_current_max = r_l_imax_args.i_max;
 		mcconf_old_second->l_current_min = -r_l_imax_args.i_max;
+#ifndef HW_NO_ABS_MAX_CALC
 		abs_max = r_l_imax_args.i_max * 1.5;
 		utils_truncate_number(&abs_max, HW_LIM_CURRENT_ABS);
 		mcconf_old_second->l_abs_current_max = abs_max;
+#endif
 		mcconf_old_second->motor_type = MOTOR_TYPE_FOC;
 		mcconf_old_second->foc_motor_r = r_l_imax_args.r;
 		mcconf_old_second->foc_motor_l = r_l_imax_args.l;

@@ -23,6 +23,7 @@
 
 #include "mcpwm_foc.h"
 #include "mcpwm_common.h"
+#include "mcpwm_adc.h"
 #include "mc_interface.h"
 #include "ch.h"
 #include "hal.h"
@@ -204,12 +205,14 @@ static void timer_reinit(int f_zv) {
 	TIM8->CCMR2 = TIM_CCMR2_OC3M_2 | TIM_CCMR2_OC3M_1 | TIM_CCMR2_OC4M_2 | TIM_CCMR2_OC4M_1;
 
 	// output enable
-	TIM1->CCER = TIM_CCER_CC1E | TIM_CCER_CC1NE | TIM_CCER_CC2E | TIM_CCER_CC2NE | TIM_CCER_CC3E | TIM_CCER_CC3NE | TIM_CCER_CC4E;
-	TIM8->CCER = TIM_CCER_CC1E | TIM_CCER_CC1NE | TIM_CCER_CC2E | TIM_CCER_CC2NE | TIM_CCER_CC3E | TIM_CCER_CC3NE | TIM_CCER_CC4E;
+	TIM1->CCER = TIM_CCER_CC1E | TIM_CCER_CC1NE | TIM_CCER_CC2E | TIM_CCER_CC2NE |
+			TIM_CCER_CC3E | TIM_CCER_CC3NE | TIM_CCER_CC4E | TIMER_OUTPUT_POLARITY;
+	TIM8->CCER = TIM_CCER_CC1E | TIM_CCER_CC1NE | TIM_CCER_CC2E | TIM_CCER_CC2NE |
+			TIM_CCER_CC3E | TIM_CCER_CC3NE | TIM_CCER_CC4E | TIMER_OUTPUT_POLARITY;
 
-	// Idle state high
-	TIM1->CR2 = TIM_CR2_OIS1 | TIM_CR2_OIS1N | TIM_CR2_OIS2 | TIM_CR2_OIS2N | TIM_CR2_OIS3 | TIM_CR2_OIS3N | TIM_CR2_OIS4;
-	TIM8->CR2 = TIM_CR2_OIS1 | TIM_CR2_OIS1N | TIM_CR2_OIS2 | TIM_CR2_OIS2N | TIM_CR2_OIS3 | TIM_CR2_OIS3N | TIM_CR2_OIS4;
+	// Keep every external gate input at its inactive level while MOE is clear.
+	TIM1->CR2 = TIMER_OUTPUT_IDLE_STATE;
+	TIM8->CR2 = TIMER_OUTPUT_IDLE_STATE;
 
 	// Capture compare value
 	TIM1->CCR1 = TIM1->ARR / 2;
@@ -228,7 +231,7 @@ static void timer_reinit(int f_zv) {
 	TIM8->CCMR2 |= TIM_CCMR2_OC3PE | TIM_CCMR2_OC4PE;
 
 	// Dead-time and off state
-	uint8_t deadtime = conf_general_calculate_deadtime(HW_DEAD_TIME_NSEC, SYSTEM_TIMER_CLOCK);
+	uint8_t deadtime = timer_deadtime_from_ns(HW_DEAD_TIME_NSEC, SYSTEM_TIMER_CLOCK);
 	TIM1->BDTR =  deadtime | TIM_BDTR_OSSI | TIM_BDTR_OSSR;
 	TIM8->BDTR =  deadtime | TIM_BDTR_OSSI | TIM_BDTR_OSSR;
 
@@ -281,9 +284,6 @@ static void timer_reinit(int f_zv) {
 	// Enable Capture/Compare Preload
 	TIM2->CR2 |= TIM_CR2_CCPC;
 
-	// PWM outputs have to be enabled in order to trigger ADC on CCx
-	TIM2->BDTR |= TIM_BDTR_MOE;
-
 #if defined HW_HAS_DUAL_MOTORS || defined HW_HAS_DUAL_PARALLEL
 	// See: https://www.cnblogs.com/shangdawei/p/4758988.html
 	// Master mode - Enable
@@ -296,8 +296,8 @@ static void timer_reinit(int f_zv) {
 	TIM8->SMCR |= TIM_SMCR_SMS_1 | TIM_SMCR_SMS_2;
 	// Master mode - Update
 	TIM8->CR2 |= TIM_CR2_MMS_1;
-	// Select input trigger for TIM2 - Internal trigger 0
-	TIM2->SMCR |= TIM_SMCR_ETF_0;
+	// TIM2 ITR1 is TIM8 TRGO on STM32H743.
+	TIM2->SMCR = (TIM2->SMCR & ~TIM_SMCR_TS) | TIM_SMCR_TS_0;
 	// Slave mode - Reset - Rising edge of the selected trigger input (TRGI) reinitializes the counter
 	// and generates an update of the registers.
 	TIM2->SMCR |= TIM_SMCR_SMS_2;
@@ -359,6 +359,13 @@ static void init_audio_state(volatile mc_audio_state *s) {
 void mcpwm_foc_init(mc_configuration *conf_m1, mc_configuration *conf_m2) {
 	utils_sys_lock_cnt();
 
+#ifdef HW_LIM_FOC_F_ZV
+	utils_truncate_number(&conf_m1->foc_f_zv, HW_LIM_FOC_F_ZV);
+#ifdef HW_HAS_DUAL_MOTORS
+	utils_truncate_number(&conf_m2->foc_f_zv, HW_LIM_FOC_F_ZV);
+#endif
+#endif
+
 #ifndef HW_HAS_DUAL_MOTORS
 	(void)conf_m2;
 #endif
@@ -396,153 +403,16 @@ void mcpwm_foc_init(mc_configuration *conf_m1, mc_configuration *conf_m2) {
 	rccResetTIM1();
 	rccResetTIM2();
 	rccResetTIM8();
-	rccResetADC12();
-	rccResetADC3();
-	rccResetDMA1();
 
 	TIM1->CNT = 0;
 	TIM2->CNT = 0;
 	TIM8->CNT = 0;
 
-
-
-	rccEnableDMA1(TRUE);
-	rccEnableADC12(TRUE);
-	rccEnableADC3(TRUE);
-
-
-	// Configure DMA Stream to pull data from ADC
-	//
-	// All three streams are configured below via direct register writes rather than
-	// ChibiOS's dmaStream*() accessors, but they still need to go through
-	// dmaStreamAlloc() once each so the driver's allocated_mask marks them reserved.
-	// Without this, streams 2/3 are invisible to the allocator - any other peripheral
-	// initialized later with a mcuconf.h *_DMA_STREAM set to STM32_DMA_STREAM_ID_ANY
-	// (I2C/SPI/UART all default to ANY in mcuconf-h7.h) can and will get handed one of
-	// these "free" streams, resetting its CR to 0 and silently killing that ADC's
-	// current/voltage sampling with no DMA error flag raised anywhere.
-	dmaStreamAlloc(STM32_DMA_STREAM_ID(1, 1),
-					  5,
-					  (stm32_dmaisr_t)mcpwm_foc_adc_int_handler,
-					  (void *)0);
-	dmaStreamAlloc(STM32_DMA_STREAM_ID(1, 2), 5, NULL, (void *)0);
-	dmaStreamAlloc(STM32_DMA_STREAM_ID(1, 3), 5, NULL, (void *)0);
-
-    DMA1_Stream1->CR = 0;
-    DMA1_Stream2->CR = 0;
-    DMA1_Stream3->CR = 0;
-
-    /* Peripheral → memory */
-    // PL (Very High, both priority bits set) so these ADC streams win DMA1 arbitration over
-    // other things running at a lower level (e.g. the IMU hardware-SPI transport).
-    DMA1_Stream1->CR |= DMA_SxCR_MINC | DMA_SxCR_CIRC | DMA_SxCR_PL;
-    DMA1_Stream2->CR |= DMA_SxCR_MINC | DMA_SxCR_CIRC | DMA_SxCR_PL;
-    DMA1_Stream3->CR |= DMA_SxCR_MINC | DMA_SxCR_CIRC | DMA_SxCR_PL;
-
-    /* 16-bit */
-    DMA1_Stream1->CR |= DMA_SxCR_PSIZE_0 | DMA_SxCR_MSIZE_0;
-    DMA1_Stream2->CR |= DMA_SxCR_PSIZE_0 | DMA_SxCR_MSIZE_0;
-    DMA1_Stream3->CR |= DMA_SxCR_PSIZE_0 | DMA_SxCR_MSIZE_0;
-
-#if ADC_IND_CURR1 < 3 && ADC_IND_CURR2 < 3 && ADC_IND_CURR3 < 3
-    DMA1_Stream1->CR |= DMA_SxCR_HTIE;
-    DMA1_Stream2->CR |= DMA_SxCR_HTIE;
-    DMA1_Stream3->CR |= DMA_SxCR_HTIE;
-#else
-    DMA1_Stream1->CR |= DMA_SxCR_TCIE;
-    DMA1_Stream2->CR |= DMA_SxCR_TCIE;
-    DMA1_Stream3->CR |= DMA_SxCR_TCIE;
-#endif
-
-    DMA1_Stream1->PAR  = (uint32_t)&ADC1->DR;
-    DMA1_Stream2->PAR  = (uint32_t)&ADC2->DR;
-    DMA1_Stream3->PAR  = (uint32_t)&ADC3->DR;
-
-    DMA1_Stream1->M0AR = (uint32_t)&ADC_Value[HW_ADC_IND_DMA_1];
-    DMA1_Stream2->M0AR = (uint32_t)&ADC_Value[HW_ADC_IND_DMA_2];
-    DMA1_Stream3->M0AR = (uint32_t)&ADC_Value[HW_ADC_IND_DMA_3];
-
-    DMA1_Stream1->NDTR = HW_ADC_NBR_CONV;
-    DMA1_Stream2->NDTR = HW_ADC_NBR_CONV;
-    DMA1_Stream3->NDTR = HW_ADC_NBR_CONV;
-
-    /* DMAMUX */
-    DMAMUX1_Channel1->CCR = 9;    // ADC1
-    DMAMUX1_Channel2->CCR = 10;   // ADC2
-    DMAMUX1_Channel3->CCR = 115;  // ADC3
-
-	// Enable stream
-	DMA1_Stream1->CR |= DMA_SxCR_EN;
-	DMA1_Stream2->CR |= DMA_SxCR_EN;
-	DMA1_Stream3->CR |= DMA_SxCR_EN;
-
-    ADC1->CR = ADC_CR_ADVREGEN;
-    ADC2->CR = ADC_CR_ADVREGEN;
-    ADC3->CR = ADC_CR_ADVREGEN;
-
-    chThdSleepMicroseconds(20);   // REQUIRED on cold boot
-
-    while (!(ADC1->ISR & ADC_ISR_LDORDY));
-    while (!(ADC2->ISR & ADC_ISR_LDORDY));
-    while (!(ADC3->ISR & ADC_ISR_LDORDY));
-
-    ADC1->CR |= ADC_CR_BOOST;
-    ADC2->CR |= ADC_CR_BOOST;
-    ADC3->CR |= ADC_CR_BOOST;
-
-    /* Calibration */
-    ADC1->CR |= ADC_CR_ADCAL;
-    ADC2->CR |= ADC_CR_ADCAL;
-    ADC3->CR |= ADC_CR_ADCAL;
-
-    while (ADC1->CR & ADC_CR_ADCAL);
-    while (ADC2->CR & ADC_CR_ADCAL);
-    while (ADC3->CR & ADC_CR_ADCAL);
-
-    //ADC12_COMMON->CCR |= ADC_CCR_VREFEN;
-    //ADC3_COMMON->CCR  |= ADC_CCR_VREFEN;
-
-
-    /* DMA circular */
-    ADC1->CFGR = ADC_CFGR_DMNGT_1 | ADC_CFGR_DMNGT_0;
-    ADC2->CFGR = ADC_CFGR_DMNGT_1 | ADC_CFGR_DMNGT_0;
-    ADC3->CFGR = ADC_CFGR_DMNGT_1 | ADC_CFGR_DMNGT_0;
-
-    /* 12-bit */
-	ADC1->CFGR |= ADC_CFGR_RES_2 | ADC_CFGR_RES_1;
-	ADC2->CFGR |= ADC_CFGR_RES_2 | ADC_CFGR_RES_1;
-	ADC3->CFGR |= ADC_CFGR_RES_2 | ADC_CFGR_RES_1;
-
-    /* External trigger TIM2_CC2 falling */
-    ADC1->CFGR |= ADC_CFGR_EXTSEL_1 | ADC_CFGR_EXTSEL_0 | ADC_CFGR_EXTEN_1;
-    ADC2->CFGR |= ADC_CFGR_EXTSEL_1 | ADC_CFGR_EXTSEL_0 | ADC_CFGR_EXTEN_1;
-    ADC3->CFGR |= ADC_CFGR_EXTSEL_1 | ADC_CFGR_EXTSEL_0 | ADC_CFGR_EXTEN_1;
-
-    ADC1->SQR1 = (HW_ADC_NBR_CONV - 1) << ADC_SQR1_L_Pos;
-    ADC2->SQR1 = (HW_ADC_NBR_CONV - 1) << ADC_SQR1_L_Pos;
-    ADC3->SQR1 = (HW_ADC_NBR_CONV - 1) << ADC_SQR1_L_Pos;
-
-
-	hw_setup_adc_channels();
+	if (!mcpwm_adc_init(MCPWM_ADC_MODE_FOC, mcpwm_foc_adc_int_handler)) {
+		utils_sys_unlock_cnt();
+		return;
+	}
 	foc_sample_init();
-
-	// Enable and start
-    ADC1->CR |= ADC_CR_ADEN;
-    ADC2->CR |= ADC_CR_ADEN;
-    ADC3->CR |= ADC_CR_ADEN;
-
-    while (!(ADC1->ISR & ADC_ISR_ADRDY));
-    while (!(ADC2->ISR & ADC_ISR_ADRDY));
-    while (!(ADC3->ISR & ADC_ISR_ADRDY));
-
-    /* Enable DMA AFTER ADC ready */
-    DMA1_Stream1->CR |= DMA_SxCR_EN;
-    DMA1_Stream2->CR |= DMA_SxCR_EN;
-    DMA1_Stream3->CR |= DMA_SxCR_EN;
-
-    ADC1->CR |= ADC_CR_ADSTART;
-    ADC2->CR |= ADC_CR_ADSTART;
-    ADC3->CR |= ADC_CR_ADSTART;
 
 	timer_reinit((int)m_motor_1.m_conf->foc_f_zv);
 
@@ -692,10 +562,7 @@ void mcpwm_foc_deinit(void) {
 	rccResetTIM2();
 	rccResetTIM8();
 
-	rccResetADC12();
-	rccResetADC3();
-	dmaStreamFree(STM32_DMA1_STREAM1);
-	nvicDisableVector(ADC_IRQn);
+	mcpwm_adc_deinit();
 }
 
 static volatile motor_all_state_t *get_motor_now(void) {
@@ -711,6 +578,9 @@ bool mcpwm_foc_init_done(void) {
 }
 
 void mcpwm_foc_set_configuration(mc_configuration *configuration) {
+#ifdef HW_LIM_FOC_F_ZV
+	utils_truncate_number(&configuration->foc_f_zv, HW_LIM_FOC_F_ZV);
+#endif
 	get_motor_now()->m_conf = configuration;
 	foc_precalc_values((motor_all_state_t*)get_motor_now());
 
@@ -4019,7 +3889,8 @@ static void timer_update(motor_all_state_t *motor, float dt) {
 	utils_truncate_number_abs(&openloop_rpm_max, conf_now->foc_openloop_rpm);
 
 	float openloop_rpm = openloop_rpm_max;
-	if (conf_now->foc_sensor_mode != FOC_SENSOR_MODE_ENCODER) {
+	if (conf_now->foc_sensor_mode != FOC_SENSOR_MODE_ENCODER &&
+			conf_now->foc_sensor_mode != FOC_SENSOR_MODE_ENCODER_AB) {
 		float time_fwd = t_lock + t_ramp + t_const - motor->m_min_rpm_timer;
 		if (time_fwd < t_lock) {
 			openloop_rpm = 0.0;

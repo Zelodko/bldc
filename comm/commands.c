@@ -1896,6 +1896,30 @@ void commands_apply_mcconf_hw_limits(mc_configuration *mcconf) {
 	utils_truncate_number(&mcconf->l_erpm_start, 0.0, 1.0);
 	utils_truncate_number(&mcconf->foc_overmod_factor, 1.0, 1.5);
 
+#ifdef HW_LIM_FOC_F_ZV
+	utils_truncate_number(&mcconf->foc_f_zv, HW_LIM_FOC_F_ZV);
+#endif
+#ifdef HW_LIM_BLDC_F_SW
+	utils_truncate_number(&mcconf->m_bldc_f_sw_min, HW_LIM_BLDC_F_SW);
+	utils_truncate_number(&mcconf->m_bldc_f_sw_max, HW_LIM_BLDC_F_SW);
+	if (mcconf->m_bldc_f_sw_min > mcconf->m_bldc_f_sw_max) {
+		mcconf->m_bldc_f_sw_min = mcconf->m_bldc_f_sw_max;
+	}
+#endif
+#ifdef HW_LIM_DC_F_SW
+	utils_truncate_number(&mcconf->m_dc_f_sw, HW_LIM_DC_F_SW);
+#endif
+#ifdef HW_BLDC_FORCE_PWM_MODE
+	if (mcconf->motor_type == MOTOR_TYPE_BLDC) {
+		mcconf->pwm_mode = HW_BLDC_FORCE_PWM_MODE;
+	}
+#endif
+#ifdef HW_DISABLE_DC_MOTOR_MODE
+	if (mcconf->motor_type == MOTOR_TYPE_DC) {
+		mcconf->motor_type = MOTOR_TYPE_FOC;
+	}
+#endif
+
 	float ctrl_loop_freq = 0.0;
 
 #if FOC_CONTROL_LOOP_FREQ_DIVIDER < 2 // When skipping cycles you are on your own!

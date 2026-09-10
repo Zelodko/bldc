@@ -141,8 +141,8 @@
 /*
  * MCU
  */
-// This used for the timers, and they run at half the system freq
-#define SYSTEM_TIMER_CLOCK			STM32_SYS_CK / 2
+// Motor-control timers run at half the system clock on this H7 configuration.
+#define SYSTEM_TIMER_CLOCK			(STM32_SYS_CK / 2)
 #define STM32_UUID					((uint32_t*)0x1FF1E800)
 #define STM32_UUID_8				((uint8_t*)0x1FF1E800)
 
